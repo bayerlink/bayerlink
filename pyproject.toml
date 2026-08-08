@@ -26,9 +26,9 @@ dependencies = ["numpy"]
 test = ["pytest"]
 
 [project.urls]
-Homepage = "https://github.com/lanserge/bayerlink"
-Source = "https://github.com/lanserge/bayerlink"
-Issues = "https://github.com/lanserge/bayerlink/issues"
+Homepage = "https://github.com/bayerlink/bayerlink"
+Source = "https://github.com/bayerlink/bayerlink"
+Issues = "https://github.com/bayerlink/bayerlink/issues"
 
 [tool.setuptools.packages.find]
 include = ["bayerlink*"]
