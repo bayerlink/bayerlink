@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bayerlink"
+version = "0.1.0"
+description = "Raw sensor data over an HDMI/DVI link: the bayerlink protocol and its reference implementation"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Serge Rabyking" }]
+requires-python = ">=3.9"
+keywords = ["bayer", "raw", "hdmi", "dvi", "fpga", "camera", "protocol", "video"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Software Development :: Embedded Systems",
+]
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/lanserge/bayerlink"
+Source = "https://github.com/lanserge/bayerlink"
+Issues = "https://github.com/lanserge/bayerlink/issues"
+
+[tool.setuptools.packages.find]
+include = ["bayerlink*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
