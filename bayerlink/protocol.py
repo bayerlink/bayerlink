@@ -263,3 +263,36 @@ def decode_frame(frame: np.ndarray) -> tuple[Header, np.ndarray]:
             f"has {lines.shape[0] - 1}")
     payload = lines[1:1 + header.height, :header.line_bytes]
     return header, unpack12p(payload)
+
+
+def detect_lane_map(frame: np.ndarray):
+    """Which byte permutation makes this captured frame a bayerlink container.
+
+    The wire protocol is defined over the memory byte sequence; which byte
+    rides which video lane is a per-platform permutation. Rather than
+    resolving it with a scope, feed any captured frame here: all six
+    permutations are tried against the header's magic and CRC -- 32 bytes of
+    evidence, so a false positive is not a realistic concern.
+
+    Returns ``(permutation, Header)`` where ``permutation[k]`` says which
+    captured channel holds container byte k -- directly usable as the
+    ``lane_map`` of a receiver. Raises if none fits, with the diagnosis in
+    the usual order of likelihood.
+    """
+    import itertools
+
+    frame = np.asarray(frame, dtype=np.uint8)
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError(f"expected (height, width, 3), got {frame.shape}")
+    for permutation in itertools.permutations(range(3)):
+        candidate = frame[:, :, list(permutation)]
+        try:
+            header = Header.unpack(
+                candidate.reshape(frame.shape[0], -1)[0, :HEADER_BYTES].tobytes())
+        except ValueError:
+            continue
+        return tuple(permutation), header
+    raise ValueError(
+        "no byte permutation yields a valid header: the capture is not a "
+        "bayerlink frame, or the link altered pixel VALUES (range clamp, "
+        "YCbCr conversion, scaling) rather than merely permuting lanes.")

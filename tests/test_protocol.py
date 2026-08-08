@@ -172,3 +172,82 @@ def test_the_committed_vectors_are_what_this_implementation_produces():
             np.frombuffer(committed, np.uint8).reshape(height + 4, width, 3))
         assert np.array_equal(raw, pattern.generate(mode, width, height)), name
         assert header.frame_seq == seq and header.bayer_order == order
+
+
+# --------------------------------------------------------------------------- #
+# Lane detection and the luma tunnel: the bench helpers
+# --------------------------------------------------------------------------- #
+
+def test_detect_lane_map_recovers_any_permutation():
+    from itertools import permutations
+
+    raw = pattern.generate("gradient", 16, 4)
+    container = protocol.encode_frame(raw, "GBRG", frame_seq=9,
+                                      display=(16, 8))
+    for perm in permutations(range(3)):
+        # A link that put container byte k on channel perm[k]:
+        scrambled = np.empty_like(container)
+        for k in range(3):
+            scrambled[:, :, perm[k]] = container[:, :, k]
+        found, header = protocol.detect_lane_map(scrambled)
+        assert found == perm
+        assert header.frame_seq == 9 and header.bayer_order == "GBRG"
+
+
+def test_detect_lane_map_refuses_a_value_mangling_link():
+    raw = pattern.generate("gradient", 16, 4)
+    container = protocol.encode_frame(raw, "RGGB", frame_seq=0,
+                                      display=(16, 8))
+    clamped = np.clip(container, 16, 235)        # a limited-range link
+    with pytest.raises(ValueError, match="altered pixel VALUES"):
+        protocol.detect_lane_map(clamped)
+
+
+def _nasty_channel(grey, rng):
+    """What a cheap dongle does to luma: range-squeeze, round, add noise."""
+    y = grey[:, :, 0].astype(np.float64)
+    y = 16.0 + y * (219.0 / 255.0)               # limited-range squeeze
+    y = y + rng.normal(0.0, 1.0, y.shape)        # analog-ish noise
+    return np.clip(np.round(y), 0, 255).astype(np.uint8)
+
+
+def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
+    """The whole point: exact bytes through a lossy-looking path."""
+    from bayerlink import tunnel
+
+    rng = np.random.default_rng(20260808)
+    phys = (192, 40)                              # inner width 32
+    inner_w, _ = tunnel.inner_display(*phys)
+    raw = pattern.generate("corners", inner_w * 2, 20)
+    # ^ inner_w*2 samples = inner_w*3 bytes: exactly fills the inner line
+    container = protocol.encode_frame(raw, "BGGR", frame_seq=3,
+                                      display=(inner_w, 24))
+    grey = tunnel.encode(container, phys)
+    assert (grey[:, :, 0] == grey[:, :, 1]).all() and \
+           (grey[:, :, 0] == grey[:, :, 2]).all()
+
+    luma = _nasty_channel(grey, rng)
+    recovered = tunnel.decode(luma, inner_height=container.shape[0])
+    assert np.array_equal(recovered, container)
+
+    header, decoded = protocol.decode_frame(recovered)
+    assert np.array_equal(decoded, raw)
+    assert header.frame_seq == 3 and header.bayer_order == "BGGR"
+
+
+def test_luma_tunnel_refuses_a_channel_it_cannot_classify():
+    from bayerlink import tunnel
+
+    phys = (192, 40)
+    inner_w, _ = tunnel.inner_display(*phys)
+    raw = pattern.generate("gradient", inner_w * 2 - 2, 8)
+    container = protocol.encode_frame(raw, "RGGB", frame_seq=0,
+                                      display=(inner_w, 12))
+    grey = tunnel.encode(container, phys)
+
+    crushed = (grey[:, :, 0] // 16).astype(np.uint8)   # 4 counts per level
+    with pytest.raises(ValueError, match="too noisy or too compressed"):
+        tunnel.decode(crushed, inner_height=container.shape[0])
+
+    with pytest.raises(ValueError, match="not a monotonic map"):
+        tunnel.decode(255 - grey[:, :, 0], inner_height=container.shape[0])
