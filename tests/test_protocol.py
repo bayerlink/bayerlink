@@ -379,3 +379,34 @@ def test_stripes_of_different_frames_or_cameras_never_mix():
         protocol.reassemble([stripes(1, 0)[0], stripes(2, 0)[1]])
     with pytest.raises(ValueError, match="source_id"):
         protocol.reassemble([stripes(5, 0)[0], stripes(5, 1)[1]])
+
+
+# --------------------------------------------------------------------------- #
+# The luma tunnel learns its channel
+# --------------------------------------------------------------------------- #
+
+def test_tunnel_survives_a_delayed_channel_bit_exactly():
+    """Real capture sticks delay the line by a few pixels; the pilot must
+    learn the delay along with the levels -- this was found on hardware,
+    on the first frame the first stick ever returned."""
+    from bayerlink import tunnel
+
+    inner = tunnel.inner_display(1920, 1080)
+    raw = pattern.generate("counting", 512, 240)
+    container = protocol.encode_frame(raw, "RGGB", frame_seq=3, display=inner)
+    luma = tunnel.encode(container, (1920, 1080))[:, :, 0]
+    for delay in (0, 2, 7):
+        shifted = np.zeros_like(luma)
+        shifted[:, delay:] = luma[:, :1920 - delay]
+        header, decoded = protocol.decode_frame(
+            tunnel.decode(shifted, inner_height=inner[1]))
+        assert np.array_equal(decoded, raw), f"delay {delay}"
+        assert header.frame_seq == 3
+
+
+def test_tunnel_refuses_a_channel_that_is_not_a_staircase():
+    from bayerlink import tunnel
+
+    flat = np.full((1080, 1920), 128, np.uint8)
+    with pytest.raises(ValueError, match="not strictly increasing"):
+        tunnel.decode(flat, inner_height=1079)

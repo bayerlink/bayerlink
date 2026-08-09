@@ -101,23 +101,54 @@ def decode(luma: np.ndarray, inner_height: int) -> np.ndarray:
     # Learn what each of the 16 levels became: median per residue class of
     # the pilot row. Median, not mean -- a few corrupted pixels must not
     # drag a centroid.
+    #
+    # The channel may also DELAY the line by a few pixels -- real capture
+    # sticks do -- which shifts every cell right by the same amount. The
+    # pilot learns that too: fold it at every offset, and the one offset
+    # whose staircase is strictly increasing IS the delay, unique by
+    # construction for delays smaller than one pilot period. A channel
+    # property never needs to be configured when a pilot can measure it.
     pilot = luma[0, :used].astype(np.int32)
-    centroids = np.empty(LEVELS, np.int32)
-    for level in range(LEVELS):
-        centroids[level] = int(np.median(pilot[level::LEVELS]))
-    order = np.diff(centroids)
-    if not (order > 0).all():
+    candidates = []
+    for shift in range(LEVELS):
+        folded = np.empty(LEVELS, np.int32)
+        for level in range(LEVELS):
+            folded[level] = int(np.median(
+                pilot[(level + shift) % LEVELS::LEVELS]))
+        steps = np.diff(folded)
+        if (steps > 0).all():
+            candidates.append((shift, folded, int(steps.min())))
+    if not candidates:
+        zero_fold = [int(np.median(pilot[level::LEVELS]))
+                     for level in range(LEVELS)]
         raise ValueError(
-            "pilot centroids are not strictly increasing: the channel is not "
-            "a monotonic map of luma (wrong line captured, scaling, or not a "
-            f"tunnel frame). Learned: {centroids.tolist()}")
-    if int(order.min()) < 4:
+            "pilot centroids are not strictly increasing at any delay: the "
+            "channel is not a monotonic map of luma (wrong line captured, "
+            f"scaling, or not a tunnel frame). Learned at delay 0: {zero_fold}")
+    if len(candidates) > 1:
         raise ValueError(
-            f"pilot levels are only {int(order.min())} counts apart; the "
-            "channel is too noisy or too compressed to classify nibbles "
-            "safely. Refusing beats returning plausible wrong bytes.")
+            f"pilot is ambiguous: {len(candidates)} delays fold to a "
+            "monotonic staircase. Refusing beats guessing which one lies.")
+    shift, centroids, gap = candidates[0]
+    if gap < 4:
+        raise ValueError(
+            f"pilot levels are only {gap} counts apart; the channel is too "
+            "noisy or too compressed to classify nibbles safely. Refusing "
+            "beats returning plausible wrong bytes.")
 
-    payload = luma[1:1 + inner_height, :used].astype(np.int32)
+    # Undo the delay: content for column x arrived at column x + delay.
+    # Delays past the frame edge lose those columns physically; they are
+    # padded as zeros and left for the container's own checks to judge --
+    # which is why a source should not fill the tunnel to its last byte.
+    delay = shift if shift < LEVELS // 2 else shift - LEVELS
+    rows = luma[1:1 + inner_height].astype(np.int32)
+    if delay >= 0:
+        payload = rows[:, delay:delay + used]
+    else:
+        payload = rows[:, :max(0, used + delay)]
+        payload = np.pad(payload, ((0, 0), (-delay, 0)))
+    if payload.shape[1] < used:
+        payload = np.pad(payload, ((0, 0), (0, used - payload.shape[1])))
     # Nearest centroid via midpoint thresholds -- one searchsorted, no loops.
     thresholds = (centroids[:-1] + centroids[1:] + 1) // 2
     nibbles = np.searchsorted(thresholds, payload.ravel(),
