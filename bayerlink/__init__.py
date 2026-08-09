@@ -14,17 +14,21 @@ from .protocol import (
     check_geometry,
     decode_frame,
     encode_frame,
+    encode_stripes,
     fits_line_rate,
     fourcc_for,
     pack12p,
+    reassemble,
+    split_stripes,
     unpack12p,
 )
 from . import pattern, tunnel
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Header", "encode_frame", "decode_frame", "pack12p", "unpack12p",
+    "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",
     "BAYER_PHASE", "FLAG_TEST_PATTERN", "pattern",
     "detect_lane_map", "tunnel",

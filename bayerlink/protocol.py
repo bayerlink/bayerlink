@@ -1,4 +1,4 @@
-"""bayerlink v1: the reference implementation of PROTOCOL.md.
+"""bayerlink v2: the reference implementation of PROTOCOL.md.
 
 This module IS the executable form of the specification, and it lives in the
 protocol's own repository so that every encoder and every receiver -- the Pi
@@ -17,14 +17,18 @@ from dataclasses import dataclass
 import numpy as np
 
 MAGIC = 0x4B4C5942            # the bytes "BYLK", little-endian
-VERSION = 1
-HEADER_BYTES = 32
-_HEADER_FMT = "<IHHIIIII"     # magic, version, header_bytes, fourcc,
-                              # width, height, frame_seq, flags
+VERSION = 2
+HEADER_BYTES = 48
+_HEADER_FMT = "<IHHIIIIIBBBBIII"   # magic, version, header_bytes, fourcc,
+                                   # width, height, frame_seq, flags,
+                                   # source_id, stripe_index, stripe_count,
+                                   # reserved, stripe_offset, full_height,
+                                   # reserved2
 
 FLAG_TEST_PATTERN = 1 << 0
+_KNOWN_FLAGS = FLAG_TEST_PATTERN
 
-# V4L2 raw fourccs carried by version 1: the 12-bit packed Bayer family.
+# V4L2 raw fourccs required by version 2: the 12-bit packed Bayer family.
 # The fourcc encodes format, bit depth AND Bayer order in one field that
 # already has an external authority defining it.
 _FOURCC_12P = {
@@ -55,7 +59,7 @@ def fourcc_for(order: str, bits: int = 12) -> str:
     """The fourcc for a Bayer order at a bit depth version 1 carries."""
     if bits != 12:
         raise ValueError(
-            f"bayerlink v1 carries the 12-bit packed family; {bits}-bit payloads "
+            f"bayerlink v2 requires the 12-bit packed family; {bits}-bit payloads "
             "are a future fourcc, not a variation of this one")
     try:
         return _ORDER_TO_FOURCC[order.upper()]
@@ -71,14 +75,58 @@ def fourcc_for(order: str, bits: int = 12) -> str:
 
 @dataclass(frozen=True)
 class Header:
-    """The 32 bytes at the start of line 0, parsed."""
+    """The 48 bytes at the start of line 0, parsed and validated.
+
+    ``height`` is the payload lines THIS stream carries -- a stripe's band
+    when the frame travels over several links, or the whole frame when it
+    does not. ``full_height`` is the whole frame either way, and the stripe
+    fields say which slice this is; ``source_id`` says which camera, so two
+    independent streams are never mistaken for stripes of each other.
+    Identity travels in-band -- pairing never depends on which capture
+    device a frame happened to arrive through.
+    """
 
     fourcc: str
     width: int
     height: int
     frame_seq: int
     flags: int = 0
+    source_id: int = 0
+    stripe_index: int = 0
+    stripe_count: int = 1
+    stripe_offset: int = 0
+    full_height: int = 0          # 0 -> normalised to height (unstriped)
     version: int = VERSION
+
+    def __post_init__(self):
+        if self.full_height == 0:
+            object.__setattr__(self, "full_height", self.height)
+        if not 1 <= self.stripe_count <= 255:
+            raise ValueError(f"stripe_count {self.stripe_count} outside 1..255")
+        if not 0 <= self.stripe_index < self.stripe_count:
+            raise ValueError(
+                f"stripe_index {self.stripe_index} outside this frame's "
+                f"{self.stripe_count} stripe(s)")
+        if not 0 <= self.source_id <= 255:
+            raise ValueError(f"source_id {self.source_id} outside u8")
+        if self.stripe_count == 1:
+            if self.stripe_offset != 0 or self.full_height != self.height:
+                raise ValueError(
+                    "an unstriped stream must have stripe_offset 0 and "
+                    f"full_height == height; got offset {self.stripe_offset}, "
+                    f"full_height {self.full_height}, height {self.height}")
+        else:
+            if self.stripe_offset % 2 or self.height % 2:
+                raise ValueError(
+                    "stripe boundaries must land on even camera lines -- an "
+                    "odd offset or band flips the CFA phase mid-frame, which "
+                    "presents as a demosaic bug two projects downstream; got "
+                    f"offset {self.stripe_offset}, band {self.height}")
+            if self.stripe_offset + self.height > self.full_height:
+                raise ValueError(
+                    f"stripe [{self.stripe_offset}, "
+                    f"{self.stripe_offset + self.height}) exceeds the "
+                    f"{self.full_height}-line frame")
 
     @property
     def bayer_order(self) -> str:
@@ -104,7 +152,8 @@ class Header:
         body = struct.pack(
             _HEADER_FMT, MAGIC, self.version, HEADER_BYTES,
             fourcc_code(self.fourcc), self.width, self.height,
-            self.frame_seq, self.flags)
+            self.frame_seq, self.flags, self.source_id, self.stripe_index,
+            self.stripe_count, 0, self.stripe_offset, self.full_height, 0)
         return body + struct.pack("<I", zlib.crc32(body))
 
     @classmethod
@@ -112,24 +161,40 @@ class Header:
         """Parse and VERIFY a header. Refusal is the API: no guessed decodes."""
         if len(raw) < HEADER_BYTES:
             raise ValueError(f"header needs {HEADER_BYTES} bytes, got {len(raw)}")
-        body, crc = raw[:28], struct.unpack("<I", raw[28:32])[0]
-        (magic, version, header_bytes, code,
-         width, height, frame_seq, flags) = struct.unpack(_HEADER_FMT, body)
+        body, crc = raw[:44], struct.unpack("<I", raw[44:48])[0]
+        (magic, version, header_bytes, code, width, height, frame_seq, flags,
+         source_id, stripe_index, stripe_count, reserved,
+         stripe_offset, full_height, reserved2) = struct.unpack(_HEADER_FMT, body)
         if magic != MAGIC:
             raise ValueError(
                 f"not a bayerlink stream: magic {magic:#010x}, expected {MAGIC:#010x}. "
                 "The usual causes are a limited-range or YCbCr link, or byte-lane "
                 "permutation -- see PROTOCOL.md, 'Requirements on the link'.")
+        if version != VERSION:
+            # Checked BEFORE the CRC: version 1's CRC sits at byte 28, so a
+            # v1 frame read as v2 would report "corrupt" -- wrong diagnosis.
+            raise ValueError(
+                f"bayerlink version {version} is not the {VERSION} this "
+                "implementation speaks. Version 1 (32-byte header) is "
+                "historical -- reference releases up to 0.2.0 -- with no "
+                "deployed sources; anything newer needs a newer decoder.")
         if crc != zlib.crc32(body):
             raise ValueError(
                 "header CRC mismatch: the magic survived but the header did not. "
                 "Suspect a link that modifies pixel values (range clamp, dithering).")
-        if version != VERSION:
-            raise ValueError(
-                f"bayerlink version {version} is not the {VERSION} this "
-                "implementation speaks; refusing rather than guessing")
         if header_bytes < HEADER_BYTES:
-            raise ValueError(f"header_bytes {header_bytes} is shorter than v1's minimum")
+            raise ValueError(
+                f"header_bytes {header_bytes} is shorter than v2's minimum")
+        if reserved or reserved2:
+            raise ValueError(
+                "reserved header bytes are nonzero; they are must-be-zero in "
+                "v2, and a sender setting them is speaking a future dialect "
+                "this decoder would only misread")
+        if flags & ~_KNOWN_FLAGS:
+            raise ValueError(
+                f"unknown flag bits {flags & ~_KNOWN_FLAGS:#x} set; v2 "
+                "defines only bit 0 (test pattern), and unknown flags are "
+                "refused rather than ignored")
         text = fourcc_text(code)
         if text not in _FOURCC_12P:
             raise ValueError(
@@ -140,7 +205,10 @@ class Header:
         if height <= 0:
             raise ValueError(f"height {height} must be positive")
         return cls(fourcc=text, width=width, height=height,
-                   frame_seq=frame_seq, flags=flags, version=version)
+                   frame_seq=frame_seq, flags=flags, source_id=source_id,
+                   stripe_index=stripe_index, stripe_count=stripe_count,
+                   stripe_offset=stripe_offset, full_height=full_height,
+                   version=version)
 
 
 # --------------------------------------------------------------------------- #
@@ -222,12 +290,17 @@ def fits_line_rate(width: int, total_line_slots: int) -> bool:
 
 def encode_frame(raw: np.ndarray, bayer_order: str, frame_seq: int,
                  display: tuple[int, int] = (1920, 1080),
-                 flags: int = 0) -> np.ndarray:
+                 flags: int = 0, source_id: int = 0,
+                 stripe: tuple[int, int, int, int] | None = None) -> np.ndarray:
     """One camera frame -> the (height, width, 3) uint8 container to scan out.
 
     ``raw`` is (lines, samples) uint16, one camera line per row. The result is
     the display frame's memory image: header in line 0, one packed camera line
     per display line, zeros elsewhere.
+
+    ``stripe`` is ``(index, count, offset, full_height)`` when ``raw`` is one
+    band of a larger frame travelling over several links; most callers want
+    :func:`encode_stripes`, which derives it.
     """
     raw = np.asarray(raw)
     if raw.ndim != 2:
@@ -236,8 +309,11 @@ def encode_frame(raw: np.ndarray, bayer_order: str, frame_seq: int,
     check_geometry(width, height, display)
     display_width, display_height = display
 
+    index, count, offset, full = stripe if stripe else (0, 1, 0, height)
     header = Header(fourcc=fourcc_for(bayer_order), width=width, height=height,
-                    frame_seq=frame_seq, flags=flags)
+                    frame_seq=frame_seq, flags=flags, source_id=source_id,
+                    stripe_index=index, stripe_count=count,
+                    stripe_offset=offset, full_height=full)
     frame = np.zeros((display_height, display_width * 3), np.uint8)
     frame[0, :HEADER_BYTES] = np.frombuffer(header.pack(), np.uint8)
     frame[1:1 + height, :header.line_bytes] = pack12p(raw.astype(np.uint16))
@@ -263,6 +339,102 @@ def decode_frame(frame: np.ndarray) -> tuple[Header, np.ndarray]:
             f"has {lines.shape[0] - 1}")
     payload = lines[1:1 + header.height, :header.line_bytes]
     return header, unpack12p(payload)
+
+
+def split_stripes(height: int, stripes: int) -> list[tuple[int, int]]:
+    """``(offset, band_height)`` per stripe: contiguous even bands, in order.
+
+    Bands are even so every stripe boundary lands on a whole CFA row -- the
+    rule the Header enforces -- and as equal as evenness allows, the earlier
+    stripes taking the surplus.
+    """
+    if stripes < 1:
+        raise ValueError(f"stripes {stripes} must be at least 1")
+    if height % 2 or height < 2 * stripes:
+        raise ValueError(
+            f"{height} camera lines cannot split into {stripes} even bands; "
+            "striping needs an even height of at least 2 lines per stripe")
+    base = (height // stripes) & ~1
+    surplus = (height - base * stripes) // 2
+    bands, offset = [], 0
+    for index in range(stripes):
+        band = base + (2 if index < surplus else 0)
+        bands.append((offset, band))
+        offset += band
+    return bands
+
+
+def encode_stripes(raw: np.ndarray, bayer_order: str, frame_seq: int,
+                   stripes: int = 2,
+                   display: tuple[int, int] = (1920, 1080),
+                   flags: int = 0, source_id: int = 0) -> list[np.ndarray]:
+    """One camera frame -> one container per link.
+
+    Each container is an independently valid bayerlink stream -- decodable
+    alone into its band -- whose header says which slice it carries; a
+    receiver pairs them by (source_id, frame_seq) and reassembles with
+    :func:`reassemble`. The two scanouts share no vsync, so pairing is by
+    header contents, never by capture timing.
+    """
+    raw = np.asarray(raw)
+    if raw.ndim != 2:
+        raise ValueError(f"raw frame must be (lines, samples), got {raw.shape}")
+    full = raw.shape[0]
+    return [
+        encode_frame(raw[offset:offset + band], bayer_order, frame_seq,
+                     display=display, flags=flags, source_id=source_id,
+                     stripe=(index, stripes, offset, full))
+        for index, (offset, band) in enumerate(split_stripes(full, stripes))
+    ]
+
+
+def reassemble(parts) -> tuple[Header, np.ndarray]:
+    """Decoded stripes -> the whole frame, or a refusal naming the gap.
+
+    ``parts`` is ``[(Header, band), ...]`` in any order, as
+    :func:`decode_frame` produced them. Every stripe of the SAME frame must
+    be present exactly once: bands must tile [0, full_height) with no gap
+    and no overlap, and every header must agree on what frame this is. An
+    incomplete set is refused -- the caller drops the whole frame, because
+    a torn pair is worse than a dropped one.
+    """
+    parts = list(parts)
+    if not parts:
+        raise ValueError("no stripes to reassemble")
+    first = parts[0][0]
+    identity = ("fourcc", "width", "full_height", "frame_seq", "flags",
+                "source_id", "stripe_count", "version")
+    for header, _ in parts[1:]:
+        for field in identity:
+            if getattr(header, field) != getattr(first, field):
+                raise ValueError(
+                    f"stripes disagree on {field}: "
+                    f"{getattr(first, field)!r} vs {getattr(header, field)!r} "
+                    "-- these are not slices of one frame")
+    if len(parts) != first.stripe_count:
+        raise ValueError(
+            f"frame {first.frame_seq} has {first.stripe_count} stripe(s); "
+            f"got {len(parts)} -- refusing to assemble a torn frame")
+    parts.sort(key=lambda part: part[0].stripe_offset)
+    expected_offset = 0
+    for header, band in parts:
+        if header.stripe_offset != expected_offset:
+            raise ValueError(
+                f"stripe {header.stripe_index} starts at line "
+                f"{header.stripe_offset}, expected {expected_offset}: the "
+                "bands do not tile the frame")
+        if band.shape[0] != header.height:
+            raise ValueError(
+                f"stripe {header.stripe_index} carries {band.shape[0]} "
+                f"lines but its header claims {header.height}")
+        expected_offset += header.height
+    if expected_offset != first.full_height:
+        raise ValueError(
+            f"bands cover {expected_offset} of {first.full_height} lines")
+    whole = Header(fourcc=first.fourcc, width=first.width,
+                   height=first.full_height, frame_seq=first.frame_seq,
+                   flags=first.flags, source_id=first.source_id)
+    return whole, np.vstack([band for _, band in parts])
 
 
 def detect_lane_map(frame: np.ndarray):

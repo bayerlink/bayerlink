@@ -1,4 +1,4 @@
-"""bayerlink v1 against its own spec: round trips, refusals, and the rate rule."""
+"""bayerlink v2 against its own spec: round trips, refusals, striping, the rate rule."""
 import struct
 import zlib
 
@@ -40,13 +40,61 @@ def test_pack12p_refuses_odd_width_and_wide_samples():
 # --------------------------------------------------------------------------- #
 
 def test_header_round_trips_with_crc():
-    header = Header(fourcc="pRCC", width=2028, height=1080,
-                    frame_seq=42, flags=protocol.FLAG_TEST_PATTERN)
+    header = Header(fourcc="pRCC", width=2028, height=540,
+                    frame_seq=42, flags=protocol.FLAG_TEST_PATTERN,
+                    source_id=3, stripe_index=1, stripe_count=2,
+                    stripe_offset=538, full_height=1078)
     again = Header.unpack(header.pack())
     assert again == header
     assert again.bayer_order == "RGGB"
     assert again.bayer_phase == 0b00
     assert again.is_test_pattern
+    assert len(header.pack()) == protocol.HEADER_BYTES == 48
+
+
+def test_an_unstriped_header_normalises_and_pins_its_invariants():
+    plain = Header(fourcc="pgCC", width=4, height=6, frame_seq=1)
+    assert (plain.stripe_count, plain.stripe_offset,
+            plain.full_height) == (1, 0, 6)
+    with pytest.raises(ValueError, match="unstriped"):
+        Header(fourcc="pgCC", width=4, height=6, frame_seq=1,
+               stripe_offset=2)
+
+
+def test_stripe_boundaries_must_preserve_the_cfa_phase():
+    """An odd band boundary flips the Bayer phase mid-frame -- refused at
+    construction, so no encoder can emit it and no vector can contain it."""
+    with pytest.raises(ValueError, match="CFA"):
+        Header(fourcc="pRCC", width=4, height=4, frame_seq=0,
+               stripe_index=1, stripe_count=2, stripe_offset=3,
+               full_height=8)
+    with pytest.raises(ValueError, match="exceeds"):
+        Header(fourcc="pRCC", width=4, height=6, frame_seq=0,
+               stripe_index=1, stripe_count=2, stripe_offset=4,
+               full_height=8)
+    with pytest.raises(ValueError, match="stripe_index"):
+        Header(fourcc="pRCC", width=4, height=2, frame_seq=0,
+               stripe_index=2, stripe_count=2, stripe_offset=0,
+               full_height=4)
+
+
+def test_reserved_space_and_unknown_flags_are_refused():
+    """MBZ means refused, not ignored: a future dialect must fail loudly."""
+    good = bytearray(Header(fourcc="pRCC", width=4, height=2,
+                            frame_seq=0).pack())
+    for offset in (31, 40):
+        poked = bytearray(good)
+        poked[offset] = 1
+        body = bytes(poked[:44])
+        poked[44:48] = struct.pack("<I", zlib.crc32(body))
+        with pytest.raises(ValueError, match="reserved"):
+            Header.unpack(bytes(poked))
+    flagged = bytearray(good)
+    flagged[24 + 1] = 0x80                       # an undefined flag bit
+    body = bytes(flagged[:44])
+    flagged[44:48] = struct.pack("<I", zlib.crc32(body))
+    with pytest.raises(ValueError, match="unknown flag"):
+        Header.unpack(bytes(flagged))
 
 
 def test_a_corrupted_header_is_refused_not_guessed():
@@ -63,12 +111,23 @@ def test_a_corrupted_header_is_refused_not_guessed():
 
 
 def test_an_unknown_version_or_fourcc_is_refused():
-    body = struct.pack("<IHHIIIII", protocol.MAGIC, 2, 32,
-                       protocol.fourcc_code("pRCC"), 4, 2, 0, 0)
-    with pytest.raises(ValueError, match="version 2"):
+    # A HISTORICAL v1 header (32 bytes, CRC at 28): refused by VERSION, with
+    # the version named -- checked before the CRC, whose position moved, so
+    # the diagnosis is "old version" and never "corrupt".
+    v1_body = struct.pack("<IHHIIIII", protocol.MAGIC, 1, 32,
+                          protocol.fourcc_code("pRCC"), 4, 2, 0, 0)
+    v1 = v1_body + struct.pack("<I", zlib.crc32(v1_body)) + b"\x00" * 16
+    with pytest.raises(ValueError, match="version 1.*historical"):
+        Header.unpack(v1)
+    # A future version is refused the same way.
+    body = struct.pack(protocol._HEADER_FMT, protocol.MAGIC, 3, 48,
+                       protocol.fourcc_code("pRCC"), 4, 2, 0, 0,
+                       0, 0, 1, 0, 0, 2, 0)
+    with pytest.raises(ValueError, match="version 3"):
         Header.unpack(body + struct.pack("<I", zlib.crc32(body)))
-    body = struct.pack("<IHHIIIII", protocol.MAGIC, 1, 32,
-                       protocol.fourcc_code("BA10"), 4, 2, 0, 0)
+    body = struct.pack(protocol._HEADER_FMT, protocol.MAGIC, 2, 48,
+                       protocol.fourcc_code("BA10"), 4, 2, 0, 0,
+                       0, 0, 1, 0, 0, 2, 0)
     with pytest.raises(ValueError, match="not implemented"):
         Header.unpack(body + struct.pack("<I", zlib.crc32(body)))
 
@@ -162,6 +221,8 @@ def test_the_committed_vectors_are_what_this_implementation_produces():
     vectors = pathlib.Path(__file__).parent.parent / "vectors"
     spec = {"corners_16x4_rggb.bin": ("corners", 16, 4, "RGGB", 3),
             "counting_16x8_bggr.bin": ("counting", 16, 8, "BGGR", 0)}
+    stripes = ["counting_16x8_bggr_stripe0of2.bin",
+               "counting_16x8_bggr_stripe1of2.bin"]
     for name, (mode, width, height, order, seq) in spec.items():
         committed = (vectors / name).read_bytes()
         frame = protocol.encode_frame(
@@ -172,6 +233,23 @@ def test_the_committed_vectors_are_what_this_implementation_produces():
             np.frombuffer(committed, np.uint8).reshape(height + 4, width, 3))
         assert np.array_equal(raw, pattern.generate(mode, width, height)), name
         assert header.frame_seq == seq and header.bayer_order == order
+
+    # The stripe pair is the counting frame split for two links: committed
+    # bytes match the encoder, and reassembling the decoded pair reproduces
+    # the WHOLE frame's payload -- the tiling rules pinned in vector form.
+    whole = pattern.generate("counting", 16, 8)
+    produced = protocol.encode_stripes(whole, "BGGR", frame_seq=0, stripes=2,
+                                       display=(16, 8),
+                                       flags=FLAG_TEST_PATTERN)
+    parts = []
+    for name, container in zip(stripes, produced):
+        committed = (vectors / name).read_bytes()
+        assert container.tobytes() == committed, name
+        parts.append(protocol.decode_frame(
+            np.frombuffer(committed, np.uint8).reshape(8, 16, 3)))
+    header, raw = protocol.reassemble(parts)
+    assert np.array_equal(raw, whole)
+    assert header.stripe_count == 1 and header.height == 8
 
 
 # --------------------------------------------------------------------------- #
@@ -251,3 +329,53 @@ def test_luma_tunnel_refuses_a_channel_it_cannot_classify():
 
     with pytest.raises(ValueError, match="not a monotonic map"):
         tunnel.decode(255 - grey[:, :, 0], inner_height=container.shape[0])
+
+
+# --------------------------------------------------------------------------- #
+# Striping across links
+# --------------------------------------------------------------------------- #
+
+def test_split_stripes_tiles_evenly_or_refuses():
+    assert protocol.split_stripes(10, 3) == [(0, 4), (4, 4), (8, 2)]
+    assert protocol.split_stripes(8, 2) == [(0, 4), (4, 4)]
+    assert protocol.split_stripes(6, 1) == [(0, 6)]
+    with pytest.raises(ValueError, match="even"):
+        protocol.split_stripes(9, 2)
+    with pytest.raises(ValueError, match="even"):
+        protocol.split_stripes(4, 3)
+
+
+def test_striped_frame_reassembles_in_any_arrival_order():
+    raw = pattern.generate("counting", 16, 10)
+    parts = [protocol.decode_frame(container) for container in
+             protocol.encode_stripes(raw, "GBRG", frame_seq=7, stripes=3,
+                                     display=(16, 8), source_id=2)]
+    for header, _ in parts:
+        assert header.source_id == 2 and header.stripe_count == 3
+    header, out = protocol.reassemble(reversed(parts))
+    assert np.array_equal(out, raw)
+    assert (header.height, header.frame_seq, header.source_id) == (10, 7, 2)
+
+
+def test_a_torn_frame_is_refused_not_assembled():
+    """One link dropped a frame: the set is incomplete, and assembling the
+    survivors would hand downstream a plausible-looking wrong image."""
+    raw = pattern.generate("checker", 16, 8)
+    parts = [protocol.decode_frame(container) for container in
+             protocol.encode_stripes(raw, "RGGB", frame_seq=1, stripes=2,
+                                     display=(16, 8))]
+    with pytest.raises(ValueError, match="torn"):
+        protocol.reassemble(parts[:1])
+
+
+def test_stripes_of_different_frames_or_cameras_never_mix():
+    raw = pattern.generate("checker", 16, 8)
+    def stripes(seq, source):
+        return [protocol.decode_frame(c) for c in
+                protocol.encode_stripes(raw, "RGGB", frame_seq=seq,
+                                        stripes=2, display=(16, 8),
+                                        source_id=source)]
+    with pytest.raises(ValueError, match="frame_seq"):
+        protocol.reassemble([stripes(1, 0)[0], stripes(2, 0)[1]])
+    with pytest.raises(ValueError, match="source_id"):
+        protocol.reassemble([stripes(5, 0)[0], stripes(5, 1)[1]])
