@@ -306,7 +306,7 @@ def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
     from bayerlink import tunnel
 
     rng = np.random.default_rng(20260808)
-    phys = (660, 40)                              # inner width 22
+    phys = (880, 40)                              # inner width 22
     inner_w, _ = tunnel.inner_display(*phys)
     raw = pattern.generate("corners", inner_w * 2 - 2, 20)
     # ^ one byte short of a full line: a delayed channel loses the last
@@ -329,7 +329,7 @@ def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
 def test_luma_tunnel_refuses_a_channel_it_cannot_classify():
     from bayerlink import tunnel
 
-    phys = (660, 40)
+    phys = (880, 40)
     inner_w, _ = tunnel.inner_display(*phys)
     raw = pattern.generate("gradient", inner_w * 2 - 2, 8)
     container = protocol.encode_frame(raw, "RGGB", frame_seq=0,
@@ -406,7 +406,7 @@ def test_tunnel_survives_the_measured_channel_bit_exactly():
 
     rng = np.random.default_rng(20260810)
     inner = tunnel.inner_display(1920, 1080)
-    raw = pattern.generate("counting", 120, 240)
+    raw = pattern.generate("counting", 88, 240)
     container = protocol.encode_frame(raw, "RGGB", frame_seq=3, display=inner)
     grey = tunnel.encode(container, (1920, 1080))
     for delay in (0, 2, 7, 12):

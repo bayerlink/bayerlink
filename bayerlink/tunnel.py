@@ -10,12 +10,13 @@ studio-swing ceiling, a small horizontal FIR, and a two-pixel delay. None
 of that is an obstacle; it is a channel, and this module modulates through
 it on three principles measured against that hardware:
 
-  LEVELS INSIDE 16..196   full-swing tops are what a limited-range
-      interpretation clips -- and the measured MS2109-class expansion
-      saturates from about input 200, harder than the textbook 235. A
-      constellation that stays below the measured knee arrives unclipped
-      and monotone, whatever curve the stick adds, and the pilot learns
-      the rest.
+  EIGHT LEVELS IN 16..196   full-swing tops are what a limited-range
+      interpretation clips -- the measured MS2109-class expansion
+      saturates from about input 200 -- and sixteen levels left the
+      worst measured sample eleven counts from a midpoint eight away.
+      Eight levels put every midpoint sixteen counts out: the whole
+      observed error tail fits with room to spare, and the pilot still
+      learns whatever curve remains.
 
   A TRIANGLE PILOT        physical row 0 sweeps the 16 levels up and back
       down -- no cliff anywhere, so the channel's low-pass has no
@@ -31,29 +32,29 @@ it on three principles measured against that hardware:
 
 Underneath, the container is UNCHANGED: encode wraps a normal bayerlink
 container (built for a virtual, narrower display), decode hands back that
-container for the ordinary decode_frame(). Capacity costs 30x (one byte
-becomes ten pixels of three channels), which a conformance bench does not
+container for the ordinary decode_frame(). Capacity costs 40x (three
+bytes become eight cells of five pixels, of three channels), which a conformance bench does not
 care about: it needs bytes proven exact, not throughput.
 
 Layout, fixed by this module for both ends:
 
   physical row 0                pilot: the triangle level sequence
-                                0,1,..,15,14,..,1 as 5-px cells (150-px
+                                0,1,..,7,6,..,1 as 5-px cells (70-px
                                 period) across the used width
-  physical rows 1..inner_h      inner container row r-1, each byte as two
-                                nibbles, each nibble a 5-px cell, high
-                                nibble first
+  physical rows 1..inner_h      inner container row r-1, its bytes as a
+                                bit stream, three bits per 5-px cell,
+                                most significant bits first
   remaining rows / pixels       zero
 
-The inner container width is ``phys_width // 30`` (three bytes per inner
-pixel, two cells per byte, five pixels per cell).
+The inner container width is ``phys_width // 40`` (three bytes per inner
+pixel, eight cells per three bytes, five pixels per cell).
 """
 from __future__ import annotations
 
 import numpy as np
 
-LEVELS = 16
-CELL = 5                              # physical pixels per nibble cell
+LEVELS = 8
+CELL = 5                              # physical pixels per 3-bit cell
 # The constellation stays below the measured saturation knee (~200 on
 # MS2109-class expansion), not merely below the textbook 235.
 LEVEL_VALUES = np.round(np.linspace(16.0, 196.0, LEVELS)).astype(np.uint8)
@@ -65,11 +66,11 @@ PILOT_PERIOD_PX = PILOT.size * CELL                          # 60 px
 
 def inner_display(phys_width: int, phys_height: int) -> tuple[int, int]:
     """The virtual display a container must be encoded for, to fit the tunnel."""
-    if phys_width < 30 * 11:
+    if phys_width < 40 * 11:
         raise ValueError(
             f"a {phys_width}-pixel tunnel cannot carry the minimum container "
-            "width (11 inner pixels = 330 physical)")
-    return phys_width // 30, phys_height - 1
+            "width (11 inner pixels = 440 physical)")
+    return phys_width // 40, phys_height - 1
 
 
 def encode(container: np.ndarray, phys: tuple[int, int]) -> np.ndarray:
@@ -87,7 +88,7 @@ def encode(container: np.ndarray, phys: tuple[int, int]) -> np.ndarray:
             f"container {container.shape} does not fit a {phys} tunnel; "
             f"encode it for display=({inner_w}, <= {max_h})")
 
-    cells = inner_w * 6                     # nibble cells per line
+    cells = inner_w * 8                     # 3-bit cells per line
     used = cells * CELL
     grey = np.zeros((phys_height, phys_width), np.uint8)
 
@@ -95,10 +96,10 @@ def encode(container: np.ndarray, phys: tuple[int, int]) -> np.ndarray:
     grey[0, :used] = np.repeat(LEVEL_VALUES[pilot_cells], CELL)
 
     line_bytes = container.reshape(height, width * 3)
-    nibbles = np.empty((height, cells), np.uint8)
-    nibbles[:, 0::2] = line_bytes >> 4                       # high first
-    nibbles[:, 1::2] = line_bytes & 0xF
-    grey[1:1 + height, :used] = np.repeat(LEVEL_VALUES[nibbles], CELL, axis=1)
+    bits = np.unpackbits(line_bytes, axis=1)
+    groups = bits.reshape(height, cells, 3)
+    values = (groups[:, :, 0] << 2) | (groups[:, :, 1] << 1) | groups[:, :, 2]
+    grey[1:1 + height, :used] = np.repeat(LEVEL_VALUES[values], CELL, axis=1)
     return np.repeat(grey[:, :, None], 3, axis=2)
 
 
@@ -118,7 +119,7 @@ def decode(luma: np.ndarray, inner_height: int) -> np.ndarray:
     inner_w, max_h = inner_display(phys_width, phys_height)
     if inner_height > max_h:
         raise ValueError(f"inner height {inner_height} cannot fit {luma.shape}")
-    cells = inner_w * 6
+    cells = inner_w * 8
 
     def cell_reads(row, delay):
         """Each cell's centre pixel at a candidate delay; cells that fall
@@ -197,8 +198,12 @@ def decode(luma: np.ndarray, inner_height: int) -> np.ndarray:
     sampled[:, valid] = rows[:, centre[valid]]
 
     thresholds = (centroids[:-1] + centroids[1:] + 1) // 2
-    nibbles = np.searchsorted(thresholds, sampled.ravel(),
-                              side="right").astype(np.uint8)
-    nibbles = nibbles.reshape(inner_height, cells)
-    line_bytes = (nibbles[:, 0::2] << 4) | nibbles[:, 1::2]
+    values = np.searchsorted(thresholds, sampled.ravel(),
+                             side="right").astype(np.uint8)
+    values = values.reshape(inner_height, cells)
+    bits = np.empty((inner_height, cells, 3), np.uint8)
+    bits[:, :, 0] = values >> 2
+    bits[:, :, 1] = (values >> 1) & 1
+    bits[:, :, 2] = values & 1
+    line_bytes = np.packbits(bits.reshape(inner_height, cells * 3), axis=1)
     return line_bytes.reshape(inner_height, inner_w, 3)
