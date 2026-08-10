@@ -290,7 +290,9 @@ def _nasty_channel(grey, rng, delay=2):
     pinned here; a tunnel that survives this survives the hardware."""
     y = grey[:, :, 0].astype(np.float64)
     y = np.clip((y - 16.0) * (255.0 / 186.0), 0, 255)   # expand, knee ~200
-    y = 0.05 * np.roll(y, 1, axis=1) + 0.90 * y + 0.05 * np.roll(y, -1, axis=1)
+    # the low-pass measured on the bench: ~2-3 px support, symmetric
+    k = np.array([0.06, 0.16, 0.56, 0.16, 0.06])
+    y = sum(w * np.roll(y, i - 2, axis=1) for i, w in enumerate(k))
     if delay:
         shifted = np.zeros_like(y)
         shifted[:, delay:] = y[:, :y.shape[1] - delay]
@@ -304,7 +306,7 @@ def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
     from bayerlink import tunnel
 
     rng = np.random.default_rng(20260808)
-    phys = (384, 40)                              # inner width 32
+    phys = (660, 40)                              # inner width 22
     inner_w, _ = tunnel.inner_display(*phys)
     raw = pattern.generate("corners", inner_w * 2 - 2, 20)
     # ^ one byte short of a full line: a delayed channel loses the last
@@ -327,7 +329,7 @@ def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
 def test_luma_tunnel_refuses_a_channel_it_cannot_classify():
     from bayerlink import tunnel
 
-    phys = (384, 40)
+    phys = (660, 40)
     inner_w, _ = tunnel.inner_display(*phys)
     raw = pattern.generate("gradient", inner_w * 2 - 2, 8)
     container = protocol.encode_frame(raw, "RGGB", frame_seq=0,
@@ -404,7 +406,7 @@ def test_tunnel_survives_the_measured_channel_bit_exactly():
 
     rng = np.random.default_rng(20260810)
     inner = tunnel.inner_display(1920, 1080)
-    raw = pattern.generate("counting", 208, 240)
+    raw = pattern.generate("counting", 120, 240)
     container = protocol.encode_frame(raw, "RGGB", frame_seq=3, display=inner)
     grey = tunnel.encode(container, (1920, 1080))
     for delay in (0, 2, 7, 12):

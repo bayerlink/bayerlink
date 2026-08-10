@@ -24,36 +24,36 @@ it on three principles measured against that hardware:
       the same row: the fold offset that yields a strictly monotone
       staircase is the delay, unique below one pilot period.
 
-  THREE-PIXEL CELLS       every nibble is painted three times and read
-      at its CENTRE pixel, whose neighbours on both sides are its own
-      value -- a one-pixel FIR has nothing foreign to mix in at all, so
-      the classification margin is spent on noise, not on neighbours.
+  FIVE-PIXEL CELLS        every nibble is painted five times and read
+      at its CENTRE pixel, which sits two own-valued pixels away from
+      anything foreign -- the measured low-pass has ~2-3 px of support,
+      and the margin is spent on noise, not on neighbours.
 
 Underneath, the container is UNCHANGED: encode wraps a normal bayerlink
 container (built for a virtual, narrower display), decode hands back that
-container for the ordinary decode_frame(). Capacity costs 18x (one byte
-becomes six pixels of three channels), which a conformance bench does not
+container for the ordinary decode_frame(). Capacity costs 30x (one byte
+becomes ten pixels of three channels), which a conformance bench does not
 care about: it needs bytes proven exact, not throughput.
 
 Layout, fixed by this module for both ends:
 
   physical row 0                pilot: the triangle level sequence
-                                0,1,..,15,14,..,1 as 3-px cells (90-px
+                                0,1,..,15,14,..,1 as 5-px cells (150-px
                                 period) across the used width
   physical rows 1..inner_h      inner container row r-1, each byte as two
-                                nibbles, each nibble a 3-px cell, high
+                                nibbles, each nibble a 5-px cell, high
                                 nibble first
   remaining rows / pixels       zero
 
-The inner container width is ``phys_width // 18`` (three bytes per inner
-pixel, two cells per byte, three pixels per cell).
+The inner container width is ``phys_width // 30`` (three bytes per inner
+pixel, two cells per byte, five pixels per cell).
 """
 from __future__ import annotations
 
 import numpy as np
 
 LEVELS = 16
-CELL = 3                              # physical pixels per nibble cell
+CELL = 5                              # physical pixels per nibble cell
 # The constellation stays below the measured saturation knee (~200 on
 # MS2109-class expansion), not merely below the textbook 235.
 LEVEL_VALUES = np.round(np.linspace(16.0, 196.0, LEVELS)).astype(np.uint8)
@@ -65,11 +65,11 @@ PILOT_PERIOD_PX = PILOT.size * CELL                          # 60 px
 
 def inner_display(phys_width: int, phys_height: int) -> tuple[int, int]:
     """The virtual display a container must be encoded for, to fit the tunnel."""
-    if phys_width < 18 * 11:
+    if phys_width < 30 * 11:
         raise ValueError(
             f"a {phys_width}-pixel tunnel cannot carry the minimum container "
-            "width (11 inner pixels = 198 physical)")
-    return phys_width // 18, phys_height - 1
+            "width (11 inner pixels = 330 physical)")
+    return phys_width // 30, phys_height - 1
 
 
 def encode(container: np.ndarray, phys: tuple[int, int]) -> np.ndarray:
