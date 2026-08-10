@@ -20,8 +20,10 @@ test patterns exist to catch it on day one.
 ## 1. The Pi as a raw source
 
 [`picam2hdmi`](https://github.com/bayerlink/picam2hdmi) turns a Pi into a
-sensor module with an HDMI plug. On a fresh Raspberry Pi OS **Lite** (no
-desktop — the streamer must own the display):
+sensor module with an HDMI plug — its
+[SETUP.md](https://github.com/bayerlink/picam2hdmi/blob/main/SETUP.md) is
+the step-by-step from blank SD card to streaming instrument. On a fresh
+Raspberry Pi OS **Lite** (no desktop — the streamer must own the display):
 
 ```sh
 sudo pip3 install --break-system-packages picam2hdmi
