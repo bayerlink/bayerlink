@@ -10,9 +10,12 @@ studio-swing ceiling, a small horizontal FIR, and a two-pixel delay. None
 of that is an obstacle; it is a channel, and this module modulates through
 it on three principles measured against that hardware:
 
-  LEVELS INSIDE 16..235   full-swing tops are what a limited-range
-      interpretation clips; a constellation that never leaves the studio
-      swing arrives unclipped and monotone, whatever curve the stick adds.
+  LEVELS INSIDE 16..196   full-swing tops are what a limited-range
+      interpretation clips -- and the measured MS2109-class expansion
+      saturates from about input 200, harder than the textbook 235. A
+      constellation that stays below the measured knee arrives unclipped
+      and monotone, whatever curve the stick adds, and the pilot learns
+      the rest.
 
   A TRIANGLE PILOT        physical row 0 sweeps the 16 levels up and back
       down -- no cliff anywhere, so the channel's low-pass has no
@@ -51,8 +54,9 @@ import numpy as np
 
 LEVELS = 16
 CELL = 3                              # physical pixels per nibble cell
-# The constellation never leaves the studio swing: 16..235 in 16 steps.
-LEVEL_VALUES = np.round(np.linspace(16.0, 235.0, LEVELS)).astype(np.uint8)
+# The constellation stays below the measured saturation knee (~200 on
+# MS2109-class expansion), not merely below the textbook 235.
+LEVEL_VALUES = np.round(np.linspace(16.0, 196.0, LEVELS)).astype(np.uint8)
 # Pilot cell sequence: a triangle, cliff-free by construction.
 PILOT = np.concatenate([np.arange(LEVELS),
                         np.arange(LEVELS - 2, 0, -1)])       # 30 cells

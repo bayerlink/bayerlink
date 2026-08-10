@@ -289,7 +289,7 @@ def _nasty_channel(grey, rng, delay=2):
     delay, and noise. The 2026-08-10 MS2109 session is
     pinned here; a tunnel that survives this survives the hardware."""
     y = grey[:, :, 0].astype(np.float64)
-    y = np.clip((y - 16.0) * (255.0 / 219.0), 0, 255)   # expand + clip tops
+    y = np.clip((y - 16.0) * (255.0 / 186.0), 0, 255)   # expand, knee ~200
     y = 0.05 * np.roll(y, 1, axis=1) + 0.90 * y + 0.05 * np.roll(y, -1, axis=1)
     if delay:
         shifted = np.zeros_like(y)
