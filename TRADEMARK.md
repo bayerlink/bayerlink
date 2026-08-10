@@ -8,7 +8,7 @@ except to describe the origin of the work.
 What that means in practice:
 
 - **Stating conformance is welcome and needs no permission**: "speaks
-  bayerlink v1", "bayerlink-compatible", "implements bayerlink" are exactly
+  bayerlink v2", "bayerlink-compatible", "implements bayerlink" are exactly
   the reasonable descriptive uses Section 6 contemplates.
 - **Presenting the name as your own is not**: do not call an independent
   implementation, product or fork "bayerlink" or something confusable with
