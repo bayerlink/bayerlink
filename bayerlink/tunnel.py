@@ -47,7 +47,8 @@ Layout, fixed by this module for both ends:
   remaining rows / pixels       zero
 
 The inner container width is ``phys_width // 40`` (three bytes per inner
-pixel, eight cells per three bytes, five pixels per cell).
+pixel, eight cells per three bytes, five pixels per cell); the header line
+sets its minimum at 16 inner pixels.
 """
 from __future__ import annotations
 
@@ -66,10 +67,11 @@ PILOT_PERIOD_PX = PILOT.size * CELL                          # 60 px
 
 def inner_display(phys_width: int, phys_height: int) -> tuple[int, int]:
     """The virtual display a container must be encoded for, to fit the tunnel."""
-    if phys_width < 40 * 11:
+    if phys_width < 40 * 16:
         raise ValueError(
             f"a {phys_width}-pixel tunnel cannot carry the minimum container "
-            "width (11 inner pixels = 440 physical)")
+            "width (16 inner pixels for the 48-byte header line = 640 "
+            "physical)")
     return phys_width // 40, phys_height - 1
 
 

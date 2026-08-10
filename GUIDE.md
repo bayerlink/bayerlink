@@ -9,7 +9,8 @@ real hardware.
 | An FPGA board with HDMI-in | [2. Receiving on an FPGA](#2-receiving-on-an-fpga) |
 | A USB capture stick and no FPGA | [3. The no-FPGA bench](#3-the-no-fpga-bench) |
 | A sensor that is not 12-bit Bayer | [4. Other formats: 8/10/14/16-bit, mono](#4-other-formats) |
-| A codebase in another language | [5. Implementing the protocol yourself](#5-implementing-it-yourself) |
+| A stream to record, or a recording to replay | [5. Recording and replay](#5-recording-and-replay) |
+| A codebase in another language | [6. Implementing the protocol yourself](#6-implementing-it-yourself) |
 
 Whatever the path, one rule governs the link itself: **full-range RGB,
 no scaling, no overscan, 4:4:4**. A limited-range clamp (16–235) is the
@@ -115,7 +116,31 @@ A receiver implements the families it needs and refuses the rest by
 fourcc — 12-bit packed Bayer is the mandatory baseline. Encoding at a
 depth is one argument: `encode_frame(raw, "RGGB", seq, bits=10)`.
 
-## 5. Implementing it yourself
+## 5. Recording and replay
+
+A recording is the wire itself: a ``.npy`` stack of containers,
+``(n, h, w, 3) uint8`` -- every frame still carries its own header, so
+the file needs no schema of its own, and receivers already ignore
+timing (they deduplicate by ``frame_seq``), so replay pacing is
+non-semantic by construction.
+
+```sh
+bayertap --via direct save --out session.npy --frames 100   # record
+bayertap --from-file session.npy --via direct check          # replay into the tools
+sudo picam2hdmi stream --source file --file session.npy \
+     --mode 1920x1080@30                                     # replay onto the wire
+```
+
+The wire replay loops forever and re-stamps ``frame_seq`` like a live
+source (``--no-restamp`` preserves the recorded numbers for forensics).
+Physical captures record the same way -- ``macgrab.py --frames N``
+stacks what the stick delivered, channel damage included -- so a field
+failure is captured once and debugged forever. Do not reach for a video
+container format here: colorspace tags, range flags and
+scaling-tolerant players are precisely the machinery that destroys byte
+containers.
+
+## 6. Implementing it yourself
 
 [PROTOCOL.md](PROTOCOL.md) is the specification; this package is its
 reference implementation; [`vectors/`](vectors/) pins the exact bytes of
