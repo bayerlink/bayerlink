@@ -115,29 +115,29 @@ are never stripes of one another. Identity travels in-band.
 
 ## Payload formats
 
-`fourcc` is the V4L2 pixel format code of the payload bytes, so the format,
-bit depth and Bayer order travel in ONE field that already has an authority
-defining it. Version 2 requires support for the 12-bit packed family:
+`fourcc` is the V4L2 pixel format code of the payload bytes, so the
+packing, bit depth and plane meaning (a CFA order, or monochrome) travel in
+ONE field that already has an authority defining it. A version-2 receiver
+MUST implement at least the 12-bit packed Bayer family; every other row is
+optional and refused by fourcc when not implemented.
 
-| fourcc | Bayer order | Bits |
+All packed families follow the one CSI-2 rule: a GROUP of samples ships its
+high eight bits as plain bytes, then the leftover low bits packed into
+residue bytes, lowest sample first. 8-bit payloads are plain bytes; 16-bit
+are little-endian pairs.
+
+| Bits | Group | Layout |
 | --- | --- | --- |
-| `pRCC` | RGGB | 12 |
-| `pgCC` | GRBG | 12 |
-| `pGCC` | GBRG | 12 |
-| `pBCC` | BGGR | 12 |
+| 8 | 1 sample → 1 byte | `[ S0[7:0] ]` |
+| 10 | 4 samples → 5 bytes | `[S0>>2][S1>>2][S2>>2][S3>>2][ S3[1:0] S2[1:0] S1[1:0] S0[1:0] ]` |
+| 12 | 2 samples → 3 bytes | `[S0>>4][S1>>4][ S1[3:0] S0[3:0] ]` |
+| 14 | 4 samples → 7 bytes | `[S0>>6][S1>>6][S2>>6][S3>>6]` + three bytes of the four 6-bit residues, lowest first |
+| 16 | 1 sample → 2 bytes | `[ S0[7:0] ][ S0[15:8] ]` |
 
-12-bit packed layout (V4L2 `*12P`): each pair of samples `P0, P1` occupies
-three bytes —
-
-```
-byte 0:  P0[11:4]
-byte 1:  P1[11:4]
-byte 2:  P1[3:0] << 4  |  P0[3:0]
-```
-
-`width` must therefore be even, and a payload line is `width * 3 / 2` bytes.
-Other raw fourccs (10-bit packed, 16-bit) may appear without a version
-bump; a receiver refuses them by fourcc, which is why the field exists.
+`width` must be a multiple of the packing group, and a payload line is
+`width / group_samples * group_bytes` bytes. The rate rule below holds for
+every family: the line FIFO absorbs each family's burst ratio within the
+line, so the budget is stated in samples either way.
 
 Note the header line's cost: a container of N display lines carries at most
 N-1 camera lines, so a full-height 1080-line camera mode does NOT fit a
@@ -177,13 +177,17 @@ and the refusal rule handles them.
 
 ## fourcc registry
 
-Assigned — a conforming receiver implements at least the 12P family above:
+Assigned — a conforming receiver implements at least the 12P Bayer family;
+the rest is opt-in:
 
 | fourcc | Payload | Status |
 | --- | --- | --- |
-| `pRCC` `pgCC` `pGCC` `pBCC` | 12-bit packed Bayer (V4L2 `*12P`) | assigned, v1 |
-| `pRAA` `pgAA` `pGAA` `pBAA` | 10-bit packed Bayer (V4L2 `*10P`) | anticipated |
-| `BA81` family, `GREY` | 8-bit raw Bayer / monochrome (DVP-class sensors) | anticipated |
+| `pRCC` `pgCC` `pGCC` `pBCC` | 12-bit packed Bayer (V4L2 `*12P`) | assigned, mandatory |
+| `pRAA` `pgAA` `pGAA` `pBAA` | 10-bit packed Bayer (V4L2 `*10P`) | assigned |
+| `RGGB` `GRBG` `GBRG` `BA81` | 8-bit raw Bayer (V4L2 `*8`) | assigned |
+| `pREE` `pgEE` `pGEE` `pBEE` | 14-bit packed Bayer (V4L2 `*14P`) | assigned |
+| `RG16` `GR16` `GB16` `BYR2` | 16-bit raw Bayer, little-endian | assigned |
+| `GREY` `Y10P` `Y12P` `Y16 ` | monochrome, 8/10/12/16-bit | assigned |
 
 Where a V4L2 fourcc exists for a payload, it is used verbatim — the format
 then has an external authority and needs no definition here. A payload with no

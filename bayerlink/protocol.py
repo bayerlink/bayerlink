@@ -28,16 +28,34 @@ _HEADER_FMT = "<IHHIIIIIBBBBIII"   # magic, version, header_bytes, fourcc,
 FLAG_TEST_PATTERN = 1 << 0
 _KNOWN_FLAGS = FLAG_TEST_PATTERN
 
-# V4L2 raw fourccs required by version 2: the 12-bit packed Bayer family.
-# The fourcc encodes format, bit depth AND Bayer order in one field that
-# already has an external authority defining it.
-_FOURCC_12P = {
-    "pRCC": "RGGB",
-    "pgCC": "GRBG",
-    "pGCC": "GBRG",
-    "pBCC": "BGGR",
+# V4L2 raw fourccs, verbatim -- the fourcc encodes packing, bit depth AND
+# plane meaning (a CFA order, or mono) in one field that already has an
+# external authority defining it. Two orthogonal axes drive everything:
+# the DEPTH picks the packing (one CSI-2 rule, below), the ORDER column
+# says what the samples mean (None = monochrome: same container, same
+# header, simply no CFA phase to consume). A version-2 receiver MUST
+# implement at least the 12-bit packed family; everything else is opt-in,
+# refused by fourcc when not implemented.
+_FOURCC = {
+    # 8-bit: one byte per sample
+    "BA81": (8, "BGGR"), "GBRG": (8, "GBRG"),
+    "GRBG": (8, "GRBG"), "RGGB": (8, "RGGB"), "GREY": (8, None),
+    # 10-bit CSI-2 packed: 4 samples in 5 bytes
+    "pBAA": (10, "BGGR"), "pGAA": (10, "GBRG"),
+    "pgAA": (10, "GRBG"), "pRAA": (10, "RGGB"), "Y10P": (10, None),
+    # 12-bit CSI-2 packed: 2 samples in 3 bytes
+    "pBCC": (12, "BGGR"), "pGCC": (12, "GBRG"),
+    "pgCC": (12, "GRBG"), "pRCC": (12, "RGGB"), "Y12P": (12, None),
+    # 14-bit CSI-2 packed: 4 samples in 7 bytes
+    "pBEE": (14, "BGGR"), "pGEE": (14, "GBRG"),
+    "pgEE": (14, "GRBG"), "pREE": (14, "RGGB"),
+    # 16-bit little-endian: two bytes per sample
+    "BYR2": (16, "BGGR"), "GB16": (16, "GBRG"),
+    "GR16": (16, "GRBG"), "RG16": (16, "RGGB"), "Y16 ": (16, None),
 }
-_ORDER_TO_FOURCC = {order: code for code, order in _FOURCC_12P.items()}
+# depth -> (samples per packing group, bytes per group)
+_GROUP = {8: (1, 1), 10: (4, 5), 12: (2, 3), 14: (4, 7), 16: (1, 2)}
+_TO_FOURCC = {(bits, order): code for code, (bits, order) in _FOURCC.items()}
 
 # Bayer order -> the two phase bits revela-style pipelines consume:
 # bit 1 = row parity of R, bit 0 = column parity of R.
@@ -55,18 +73,21 @@ def fourcc_text(code: int) -> str:
     return int(code).to_bytes(4, "little").decode("ascii", errors="replace")
 
 
-def fourcc_for(order: str, bits: int = 12) -> str:
-    """The fourcc for a Bayer order at a bit depth version 1 carries."""
-    if bits != 12:
-        raise ValueError(
-            f"bayerlink v2 requires the 12-bit packed family; {bits}-bit payloads "
-            "are a future fourcc, not a variation of this one")
+def fourcc_for(order: str | None, bits: int = 12) -> str:
+    """The fourcc for a Bayer order (or ``None`` for mono) at a bit depth."""
+    key = None if order is None else order.upper()
     try:
-        return _ORDER_TO_FOURCC[order.upper()]
+        return _TO_FOURCC[(bits, key)]
     except KeyError:
+        depths = sorted({b for b, o in _TO_FOURCC if o == key})
+        if depths:
+            raise ValueError(
+                f"no fourcc for {order!r} at {bits} bits; that plane exists "
+                f"at {depths}") from None
         raise ValueError(
             f"unknown Bayer order {order!r}; expected one of "
-            f"{sorted(_ORDER_TO_FOURCC)}") from None
+            f"{sorted({o for _, o in _FOURCC.values() if o})} or None for "
+            "mono") from None
 
 
 # --------------------------------------------------------------------------- #
@@ -129,20 +150,28 @@ class Header:
                     f"{self.full_height}-line frame")
 
     @property
-    def bayer_order(self) -> str:
-        return _FOURCC_12P[self.fourcc]
+    def bayer_order(self) -> str | None:
+        """The CFA order, or ``None`` for a monochrome payload."""
+        return _FOURCC[self.fourcc][1]
 
     @property
     def bayer_phase(self) -> int:
-        return BAYER_PHASE[self.bayer_order]
+        order = self.bayer_order
+        if order is None:
+            raise ValueError(
+                f"{self.fourcc!r} is a monochrome payload; it carries no "
+                "CFA phase, and pretending otherwise would misconfigure "
+                "every CFA-indexed block downstream")
+        return BAYER_PHASE[order]
 
     @property
     def bits(self) -> int:
-        return 12
+        return _FOURCC[self.fourcc][0]
 
     @property
     def line_bytes(self) -> int:
-        return self.width * 3 // 2
+        group_samples, group_bytes = _GROUP[self.bits]
+        return self.width // group_samples * group_bytes
 
     @property
     def is_test_pattern(self) -> bool:
@@ -196,12 +225,16 @@ class Header:
                 "defines only bit 0 (test pattern), and unknown flags are "
                 "refused rather than ignored")
         text = fourcc_text(code)
-        if text not in _FOURCC_12P:
+        if text not in _FOURCC:
             raise ValueError(
-                f"payload fourcc {text!r} is not implemented here; v1 requires "
-                f"{sorted(_FOURCC_12P)}. Refusing a format beats decoding it wrongly.")
-        if width <= 0 or width % 2:
-            raise ValueError(f"width {width} must be positive and even for 12P")
+                f"payload fourcc {text!r} is not implemented here; this "
+                f"implementation speaks {sorted(_FOURCC)}. Refusing a format "
+                "beats decoding it wrongly.")
+        group_samples = _GROUP[_FOURCC[text][0]][0]
+        if width <= 0 or width % group_samples:
+            raise ValueError(
+                f"width {width} must be positive and a multiple of "
+                f"{group_samples} for {text!r} (its packing group)")
         if height <= 0:
             raise ValueError(f"height {height} must be positive")
         return cls(fourcc=text, width=width, height=height,
@@ -215,38 +248,95 @@ class Header:
 # 12-bit packed payload (V4L2 *12P)
 # --------------------------------------------------------------------------- #
 
-def pack12p(samples: np.ndarray) -> np.ndarray:
-    """Samples (…, N even) uint16 -> packed bytes (…, N*3/2) uint8.
+def pack_samples(samples: np.ndarray, bits: int = 12) -> np.ndarray:
+    """Samples -> payload bytes, by the one CSI-2 packing rule.
 
-    Layout per pair P0, P1:  [ P0[11:4] ][ P1[11:4] ][ P1[3:0]<<4 | P0[3:0] ]
+    Every packed family works the same way: a group of samples ships its
+    high eight bits as plain bytes, then the leftover low bits packed into
+    residue bytes, lowest sample first. 8-bit degenerates to plain bytes
+    and 16-bit to little-endian pairs. One rule, parameterised by depth --
+    a new payload format is a table row, not a new code path.
+
+        10P (4 -> 5): [s0>>2][s1>>2][s2>>2][s3>>2][s3s2s1s0 low 2s]
+        12P (2 -> 3): [s0>>4][s1>>4][s1s0 low 4s]
+        14P (4 -> 7): [s0>>6][s1>>6][s2>>6][s3>>6][three bytes of low 6s]
     """
     samples = np.asarray(samples)
-    if samples.shape[-1] % 2:
-        raise ValueError("12P packs sample PAIRS; the last axis must be even")
+    if bits not in _GROUP:
+        raise ValueError(f"no packing for {bits}-bit samples; "
+                         f"depths are {sorted(_GROUP)}")
     if samples.dtype != np.uint16:
         raise TypeError(f"samples must be uint16, got {samples.dtype}")
-    if int(samples.max(initial=0)) > 0xFFF:
-        raise ValueError("a 12-bit sample exceeds 4095; refusing to truncate")
-    p0 = samples[..., 0::2]
-    p1 = samples[..., 1::2]
-    out = np.empty(samples.shape[:-1] + (samples.shape[-1] * 3 // 2,), np.uint8)
-    out[..., 0::3] = (p0 >> 4).astype(np.uint8)
-    out[..., 1::3] = (p1 >> 4).astype(np.uint8)
-    out[..., 2::3] = (((p1 & 0xF) << 4) | (p0 & 0xF)).astype(np.uint8)
+    if int(samples.max(initial=0)) >> bits:
+        raise ValueError(
+            f"a {bits}-bit sample exceeds {(1 << bits) - 1}; refusing to "
+            "truncate")
+    group_samples, group_bytes = _GROUP[bits]
+    if samples.shape[-1] % group_samples:
+        raise ValueError(
+            f"{bits}P packs groups of {group_samples} samples; the last "
+            f"axis ({samples.shape[-1]}) must be a multiple of that")
+    n_groups = samples.shape[-1] // group_samples
+    out = np.empty(samples.shape[:-1] + (n_groups * group_bytes,), np.uint8)
+    if bits == 8:
+        out[...] = samples.astype(np.uint8)
+        return out
+    if bits == 16:
+        out[..., 0::2] = (samples & 0xFF).astype(np.uint8)
+        out[..., 1::2] = (samples >> 8).astype(np.uint8)
+        return out
+    s = [samples[..., k::group_samples] for k in range(group_samples)]
+    for k in range(group_samples):
+        out[..., k::group_bytes] = (s[k] >> (bits - 8)).astype(np.uint8)
+    low = bits - 8
+    mask = (1 << low) - 1
+    if bits == 10:
+        out[..., 4::5] = ((s[0] & mask) | ((s[1] & mask) << 2)
+                          | ((s[2] & mask) << 4)
+                          | ((s[3] & mask) << 6)).astype(np.uint8)
+    elif bits == 12:
+        out[..., 2::3] = ((s[0] & mask) | ((s[1] & mask) << 4)).astype(np.uint8)
+    else:                                   # 14
+        l = [x & mask for x in s]
+        out[..., 4::7] = (l[0] | ((l[1] & 0x3) << 6)).astype(np.uint8)
+        out[..., 5::7] = ((l[1] >> 2) | ((l[2] & 0xF) << 4)).astype(np.uint8)
+        out[..., 6::7] = ((l[2] >> 4) | (l[3] << 2)).astype(np.uint8)
     return out
 
 
-def unpack12p(packed: np.ndarray) -> np.ndarray:
-    """Inverse of :func:`pack12p`: bytes (…, M multiple of 3) -> uint16 samples."""
+def unpack_samples(packed: np.ndarray, bits: int = 12) -> np.ndarray:
+    """Inverse of :func:`pack_samples`, same rule read backwards."""
     packed = np.asarray(packed, dtype=np.uint8)
-    if packed.shape[-1] % 3:
-        raise ValueError("12P bytes come in triples; the last axis must divide by 3")
-    b0 = packed[..., 0::3].astype(np.uint16)
-    b1 = packed[..., 1::3].astype(np.uint16)
-    b2 = packed[..., 2::3].astype(np.uint16)
-    out = np.empty(packed.shape[:-1] + (packed.shape[-1] * 2 // 3,), np.uint16)
-    out[..., 0::2] = (b0 << 4) | (b2 & 0xF)
-    out[..., 1::2] = (b1 << 4) | (b2 >> 4)
+    if bits not in _GROUP:
+        raise ValueError(f"no packing for {bits}-bit samples; "
+                         f"depths are {sorted(_GROUP)}")
+    group_samples, group_bytes = _GROUP[bits]
+    if packed.shape[-1] % group_bytes:
+        raise ValueError(
+            f"{bits}P bytes come in groups of {group_bytes}; the last axis "
+            f"({packed.shape[-1]}) must be a multiple of that")
+    n_groups = packed.shape[-1] // group_bytes
+    out = np.empty(packed.shape[:-1] + (n_groups * group_samples,), np.uint16)
+    if bits == 8:
+        out[...] = packed
+        return out
+    if bits == 16:
+        out[...] = (packed[..., 0::2].astype(np.uint16)
+                    | (packed[..., 1::2].astype(np.uint16) << 8))
+        return out
+    b = [packed[..., k::group_bytes].astype(np.uint16)
+         for k in range(group_bytes)]
+    if bits == 10:
+        for k in range(4):
+            out[..., k::4] = (b[k] << 2) | ((b[4] >> (2 * k)) & 0x3)
+    elif bits == 12:
+        out[..., 0::2] = (b[0] << 4) | (b[2] & 0xF)
+        out[..., 1::2] = (b[1] << 4) | (b[2] >> 4)
+    else:                                   # 14
+        out[..., 0::4] = (b[0] << 6) | (b[4] & 0x3F)
+        out[..., 1::4] = (b[1] << 6) | ((b[4] >> 6) | ((b[5] & 0xF) << 2))
+        out[..., 2::4] = (b[2] << 6) | ((b[5] >> 4) | ((b[6] & 0x3) << 4))
+        out[..., 3::4] = (b[3] << 6) | (b[6] >> 2)
     return out
 
 
@@ -254,7 +344,8 @@ def unpack12p(packed: np.ndarray) -> np.ndarray:
 # Frame container
 # --------------------------------------------------------------------------- #
 
-def check_geometry(width: int, height: int, display: tuple[int, int]) -> None:
+def check_geometry(width: int, height: int, display: tuple[int, int],
+                   bits: int = 12) -> None:
     """Refuse a camera mode the container cannot carry.
 
     ``display`` is (active_width, active_height) of the display mode. The line
@@ -266,7 +357,8 @@ def check_geometry(width: int, height: int, display: tuple[int, int]) -> None:
             f"a {display_width}-pixel-wide container cannot hold the "
             f"{HEADER_BYTES}-byte header line; the minimum width is "
             f"{-(-HEADER_BYTES // 3)} pixels")
-    line_bytes = width * 3 // 2
+    group_samples, group_bytes = _GROUP[bits]
+    line_bytes = width // group_samples * group_bytes
     if line_bytes > display_width * 3:
         raise ValueError(
             f"{width} samples/line needs {line_bytes} bytes, but a "
@@ -288,9 +380,9 @@ def fits_line_rate(width: int, total_line_slots: int) -> bool:
     return width <= total_line_slots
 
 
-def encode_frame(raw: np.ndarray, bayer_order: str, frame_seq: int,
+def encode_frame(raw: np.ndarray, bayer_order: str | None, frame_seq: int,
                  display: tuple[int, int] = (1920, 1080),
-                 flags: int = 0, source_id: int = 0,
+                 flags: int = 0, source_id: int = 0, bits: int = 12,
                  stripe: tuple[int, int, int, int] | None = None) -> np.ndarray:
     """One camera frame -> the (height, width, 3) uint8 container to scan out.
 
@@ -306,17 +398,19 @@ def encode_frame(raw: np.ndarray, bayer_order: str, frame_seq: int,
     if raw.ndim != 2:
         raise ValueError(f"raw frame must be (lines, samples), got {raw.shape}")
     height, width = raw.shape
-    check_geometry(width, height, display)
+    check_geometry(width, height, display, bits=bits)
     display_width, display_height = display
 
     index, count, offset, full = stripe if stripe else (0, 1, 0, height)
-    header = Header(fourcc=fourcc_for(bayer_order), width=width, height=height,
-                    frame_seq=frame_seq, flags=flags, source_id=source_id,
-                    stripe_index=index, stripe_count=count,
-                    stripe_offset=offset, full_height=full)
+    header = Header(fourcc=fourcc_for(bayer_order, bits), width=width,
+                    height=height, frame_seq=frame_seq, flags=flags,
+                    source_id=source_id, stripe_index=index,
+                    stripe_count=count, stripe_offset=offset,
+                    full_height=full)
     frame = np.zeros((display_height, display_width * 3), np.uint8)
     frame[0, :HEADER_BYTES] = np.frombuffer(header.pack(), np.uint8)
-    frame[1:1 + height, :header.line_bytes] = pack12p(raw.astype(np.uint16))
+    frame[1:1 + height, :header.line_bytes] = pack_samples(
+        raw.astype(np.uint16), bits)
     return frame.reshape(display_height, display_width, 3)
 
 
@@ -338,7 +432,7 @@ def decode_frame(frame: np.ndarray) -> tuple[Header, np.ndarray]:
             f"header claims {header.height} payload lines but the container "
             f"has {lines.shape[0] - 1}")
     payload = lines[1:1 + header.height, :header.line_bytes]
-    return header, unpack12p(payload)
+    return header, unpack_samples(payload, header.bits)
 
 
 def split_stripes(height: int, stripes: int) -> list[tuple[int, int]]:

@@ -13,26 +13,72 @@ from bayerlink.protocol import Header
 # 12P packing
 # --------------------------------------------------------------------------- #
 
-def test_pack12p_matches_the_spec_byte_for_byte():
-    """The layout in PROTOCOL.md, checked against hand-computed bytes."""
-    samples = np.array([0xABC, 0x123], dtype=np.uint16)
-    packed = protocol.pack12p(samples)
-    #   byte0 = P0[11:4] = 0xAB;  byte1 = P1[11:4] = 0x12
-    #   byte2 = P1[3:0]<<4 | P0[3:0] = 0x3C
+def test_packing_matches_the_spec_byte_for_byte():
+    """The CSI-2 layouts in PROTOCOL.md, against hand-computed bytes."""
+    packed = protocol.pack_samples(np.array([0xABC, 0x123], np.uint16), 12)
     assert packed.tolist() == [0xAB, 0x12, 0x3C]
 
+    packed = protocol.pack_samples(
+        np.array([0x201, 0x102, 0x3FF, 0x000], np.uint16), 10)
+    #   highs: 0x80, 0x40, 0xFF, 0x00; lows 1,2,3,0 -> 0b00_11_10_01
+    assert packed.tolist() == [0x80, 0x40, 0xFF, 0x00, 0x39]
 
-@pytest.mark.parametrize("width,height", [(2, 1), (2028, 4), (16, 16)])
-def test_pack12p_round_trips(width, height, rng=np.random.default_rng(20260808)):
-    frame = rng.integers(0, 0x1000, (height, width)).astype(np.uint16)
-    assert np.array_equal(protocol.unpack12p(protocol.pack12p(frame)), frame)
+    packed = protocol.pack_samples(
+        np.array([0x0001, 0x0002, 0x0003, 0x3FFF], np.uint16), 14)
+    #   highs: 0,0,0,0xFF; lows 1,2,3,0x3F ->
+    #   b4 = 1 | (2&3)<<6 = 0x81; b5 = 2>>2 | (3&0xF)<<4 = 0x30
+    #   b6 = 3>>4 | 0x3F<<2 = 0xFC
+    assert packed.tolist() == [0x00, 0x00, 0x00, 0xFF, 0x81, 0x30, 0xFC]
+
+    packed = protocol.pack_samples(np.array([0xBEEF], np.uint16), 16)
+    assert packed.tolist() == [0xEF, 0xBE]                 # little-endian
+
+    packed = protocol.pack_samples(np.array([0x7F], np.uint16), 8)
+    assert packed.tolist() == [0x7F]
 
 
-def test_pack12p_refuses_odd_width_and_wide_samples():
-    with pytest.raises(ValueError, match="even"):
-        protocol.pack12p(np.zeros((4, 3), np.uint16))
-    with pytest.raises(ValueError, match="4095"):
-        protocol.pack12p(np.array([0x1000, 0], np.uint16))
+@pytest.mark.parametrize("bits", [8, 10, 12, 14, 16])
+@pytest.mark.parametrize("width,height", [(4, 1), (2028, 4), (16, 16)])
+def test_every_depth_round_trips(bits, width, height,
+                                 rng=np.random.default_rng(20260808)):
+    frame = rng.integers(0, 1 << bits, (height, width)).astype(np.uint16)
+    assert np.array_equal(
+        protocol.unpack_samples(protocol.pack_samples(frame, bits), bits),
+        frame)
+
+
+def test_packing_refuses_bad_groups_and_wide_samples():
+    with pytest.raises(ValueError, match="groups of 2"):
+        protocol.pack_samples(np.zeros((4, 3), np.uint16), 12)
+    with pytest.raises(ValueError, match="groups of 4"):
+        protocol.pack_samples(np.zeros((4, 6), np.uint16), 10)
+    with pytest.raises(ValueError, match="refusing to\s+truncate"):
+        protocol.pack_samples(np.array([0x1000, 0], np.uint16), 12)
+    with pytest.raises(ValueError, match="depths are"):
+        protocol.pack_samples(np.zeros(4, np.uint16), 11)
+
+
+def test_mono_is_a_row_in_the_table_not_a_special_case():
+    """Same container, same header; simply no CFA phase to consume."""
+    rng = np.random.default_rng(3)
+    mono = rng.integers(0, 1024, (8, 32)).astype(np.uint16)
+    frame = protocol.encode_frame(mono, None, frame_seq=7,
+                                  display=(64, 12), bits=10)
+    header, decoded = protocol.decode_frame(frame)
+    assert np.array_equal(decoded, mono)
+    assert header.fourcc == "Y10P" and header.bayer_order is None
+    with pytest.raises(ValueError, match="no CFA phase"):
+        header.bayer_phase
+
+
+def test_fourcc_for_names_what_exists():
+    assert protocol.fourcc_for("RGGB", 10) == "pRAA"
+    assert protocol.fourcc_for(None, 8) == "GREY"
+    assert protocol.fourcc_for("BGGR", 16) == "BYR2"
+    with pytest.raises(ValueError, match="exists\s+at"):
+        protocol.fourcc_for(None, 14)
+    with pytest.raises(ValueError, match="unknown Bayer order"):
+        protocol.fourcc_for("RGBW", 12)
 
 
 # --------------------------------------------------------------------------- #
@@ -219,20 +265,23 @@ def test_the_committed_vectors_are_what_this_implementation_produces():
     from bayerlink.protocol import FLAG_TEST_PATTERN
 
     vectors = pathlib.Path(__file__).parent.parent / "vectors"
-    spec = {"corners_16x4_rggb.bin": ("corners", 16, 4, "RGGB", 3),
-            "counting_16x8_bggr.bin": ("counting", 16, 8, "BGGR", 0)}
+    spec = {"corners_16x4_rggb.bin": ("corners", 16, 4, "RGGB", 3, 12),
+            "counting_16x8_bggr.bin": ("counting", 16, 8, "BGGR", 0, 12),
+            "counting_16x8_rggb10p.bin": ("counting", 16, 8, "RGGB", 0, 10),
+            "counting_16x8_grey8.bin": ("counting", 16, 8, None, 0, 8)}
     stripes = ["counting_16x8_bggr_stripe0of2.bin",
                "counting_16x8_bggr_stripe1of2.bin"]
-    for name, (mode, width, height, order, seq) in spec.items():
+    for name, (mode, width, height, order, seq, bits) in spec.items():
         committed = (vectors / name).read_bytes()
         frame = protocol.encode_frame(
             pattern.generate(mode, width, height), order, frame_seq=seq,
-            display=(width, height + 4), flags=FLAG_TEST_PATTERN)
+            display=(width, height + 4), flags=FLAG_TEST_PATTERN, bits=bits)
         assert frame.tobytes() == committed, name
         header, raw = protocol.decode_frame(
             np.frombuffer(committed, np.uint8).reshape(height + 4, width, 3))
         assert np.array_equal(raw, pattern.generate(mode, width, height)), name
         assert header.frame_seq == seq and header.bayer_order == order
+        assert header.bits == bits
 
     # The stripe pair is the counting frame split for two links: committed
     # bytes match the encoder, and reassembling the decoded pair reproduces

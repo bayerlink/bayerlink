@@ -17,17 +17,17 @@ from .protocol import (
     encode_stripes,
     fits_line_rate,
     fourcc_for,
-    pack12p,
+    pack_samples,
     reassemble,
     split_stripes,
-    unpack12p,
+    unpack_samples,
 )
 from . import pattern, tunnel
 
 __version__ = "0.3.0"
 
 __all__ = [
-    "Header", "encode_frame", "decode_frame", "pack12p", "unpack12p",
+    "Header", "encode_frame", "decode_frame", "pack_samples", "unpack_samples",
     "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",
     "BAYER_PHASE", "FLAG_TEST_PATTERN", "pattern",
