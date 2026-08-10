@@ -10,6 +10,9 @@ stripe and source identity for multi-link use, CRC).
 Real sensor data into any board with HDMI-in — no MIPI hardware, no
 deserialisers, no per-sensor bring-up on the receiver.
 
+**New here? [GUIDE.md](GUIDE.md) routes by what is on your desk** — a Pi,
+an FPGA board, a $10 capture stick, a sensor that is not 12-bit.
+
 **[PROTOCOL.md](PROTOCOL.md) is the specification.** This package is its
 reference implementation, and `vectors/` pins the exact bytes, so a
 conforming implementation in any language never has to run this one.
