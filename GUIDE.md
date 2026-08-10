@@ -30,9 +30,24 @@ sudo picam2hdmi stream --source pattern --pattern counting \
 ```
 
 That is a receiver bring-up source with no camera attached: deterministic
-patterns, self-described by the header line. `contrib/` carries a systemd
-unit for appliance mode — power on, it streams. Next on its roadmap:
-the zero-copy camera capture path (`--source camera`).
+patterns, self-described by the header line. Next on its roadmap: the
+zero-copy camera capture path (`--source camera`).
+
+For a permanent bench, run it as an INSTRUMENT — `picam2hdmi serve`
+(systemd unit in `contrib/`) streams from power-on and takes control
+over HTTP, so a test rig can drive the physical bench unattended:
+
+```sh
+curl http://picam.local:8080/status
+curl -X PUT http://picam.local:8080/source \
+     -d '{"source":"pattern","pattern":"checker","width":512,"height":240,"bayer":"RGGB"}'
+curl -T session.npy http://picam.local:8080/recordings/session.npy
+curl -X PUT http://picam.local:8080/source -d '{"source":"file","file":"session.npy"}'
+```
+
+A LAN bench instrument, not an internet service — bind and firewall
+accordingly. Refusals arrive as HTTP 400 carrying the same named errors
+the CLI prints.
 
 Sizing: a container of N display lines carries at most N−1 camera lines
 (the header costs one), and the receiver rate rule is
