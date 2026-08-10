@@ -30,8 +30,12 @@ sudo picam2hdmi stream --source pattern --pattern counting \
 ```
 
 That is a receiver bring-up source with no camera attached: deterministic
-patterns, self-described by the header line. Next on its roadmap: the
-zero-copy camera capture path (`--source camera`).
+patterns, self-described by the header line. With a camera attached,
+`--source camera` streams the sensor's own packed raw -- order and depth
+taken from libcamera's report, AE/AWB off by default (a raw source is
+deterministic; set `--exposure-us` and `--gain` yourself), and `--crop
+x,y,w,h` selects a window: how a big sensor meets the link budget, and
+how a small window fits the luma tunnel for byte-level verification.
 
 For a permanent bench, run it as an INSTRUMENT — `picam2hdmi serve`
 (systemd unit in `contrib/`) streams from power-on and takes control
