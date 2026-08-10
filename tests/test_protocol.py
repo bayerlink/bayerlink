@@ -472,3 +472,18 @@ def test_tunnel_refuses_a_channel_that_is_not_a_staircase():
     flat = np.full((1080, 1920), 128, np.uint8)
     with pytest.raises(ValueError, match="not strictly increasing"):
         tunnel.decode(flat, inner_height=1079)
+
+
+def test_encode_packed_is_encode_frame_without_the_repack():
+    """A sensor's DMA'd bytes carried verbatim must equal the sample path."""
+    rng = np.random.default_rng(9)
+    raw = rng.integers(0, 1024, (8, 32)).astype(np.uint16)
+    via_samples = protocol.encode_frame(raw, "BGGR", frame_seq=4,
+                                        display=(64, 12), bits=10)
+    packed = protocol.pack_samples(raw, 10)
+    via_packed = protocol.encode_packed(packed, "BGGR", frame_seq=4,
+                                        display=(64, 12), bits=10)
+    assert np.array_equal(via_samples, via_packed)
+    with pytest.raises(ValueError, match="whole 10-bit groups"):
+        protocol.encode_packed(packed[:, :-1], "BGGR", 0, bits=10,
+                               display=(64, 12))

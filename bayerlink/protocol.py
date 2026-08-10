@@ -414,6 +414,41 @@ def encode_frame(raw: np.ndarray, bayer_order: str | None, frame_seq: int,
     return frame.reshape(display_height, display_width, 3)
 
 
+def encode_packed(payload: np.ndarray, bayer_order: str | None,
+                  frame_seq: int, bits: int = 12,
+                  display: tuple[int, int] = (1920, 1080),
+                  flags: int = 0, source_id: int = 0) -> np.ndarray:
+    """A frame whose payload is ALREADY packed -- a sensor's own bytes.
+
+    CSI-2 receivers DMA the sensor's packed lines into memory in exactly
+    this protocol's payload layout, so an encoder on such a platform never
+    needs to unpack and repack: ``payload`` is (lines, line_bytes) uint8,
+    one packed camera line per row, carried verbatim. The sample width is
+    recovered from the packing group, so the header still speaks samples.
+    """
+    payload = np.asarray(payload, dtype=np.uint8)
+    if payload.ndim != 2:
+        raise ValueError(
+            f"packed payload must be (lines, line_bytes), got {payload.shape}")
+    group_samples, group_bytes = _GROUP[bits]
+    height, line_bytes = payload.shape
+    if line_bytes % group_bytes:
+        raise ValueError(
+            f"{line_bytes} bytes/line is not whole {bits}-bit groups of "
+            f"{group_bytes} bytes")
+    width = line_bytes // group_bytes * group_samples
+    check_geometry(width, height, display, bits=bits)
+    display_width, display_height = display
+
+    header = Header(fourcc=fourcc_for(bayer_order, bits), width=width,
+                    height=height, frame_seq=frame_seq, flags=flags,
+                    source_id=source_id)
+    frame = np.zeros((display_height, display_width * 3), np.uint8)
+    frame[0, :HEADER_BYTES] = np.frombuffer(header.pack(), np.uint8)
+    frame[1:1 + height, :line_bytes] = payload
+    return frame.reshape(display_height, display_width, 3)
+
+
 def decode_frame(frame: np.ndarray) -> tuple[Header, np.ndarray]:
     """The inverse: a captured (height, width, 3) container -> (Header, raw).
 

@@ -14,6 +14,7 @@ from .protocol import (
     check_geometry,
     decode_frame,
     encode_frame,
+    encode_packed,
     encode_stripes,
     fits_line_rate,
     fourcc_for,
@@ -27,7 +28,7 @@ from . import pattern, tunnel
 __version__ = "0.3.0"
 
 __all__ = [
-    "Header", "encode_frame", "decode_frame", "pack_samples", "unpack_samples",
+    "Header", "encode_frame", "encode_packed", "decode_frame", "pack_samples", "unpack_samples",
     "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",
     "BAYER_PHASE", "FLAG_TEST_PATTERN", "pattern",
