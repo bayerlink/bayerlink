@@ -47,6 +47,18 @@ encoder: [picam2hdmi](https://github.com/bayerlink/picam2hdmi) (Raspberry Pi,
 every libcamera sensor). To be listed: implement the spec, pass the vectors,
 open an issue.
 
+## Funding
+
+Developed independently; recurring support via
+[github.com/sponsors/lanserge](https://github.com/sponsors/lanserge), or write
+first: **s.rabykin@gmail.com**. Sponsorable capability targets carry the
+`sponsorable` label on the issue tracker — currently the
+[PiSP compressed payload family](https://github.com/bayerlink/bayerlink/issues/1)
+(Pi 5 sources at ~1 byte/sample). Scope is agreed in writing before work
+starts; sponsored work lands in the open tree immediately, licensed like
+everything else — sponsorship buys ordering and named credit, not
+exclusivity.
+
 ## Licence
 
 Apache-2.0 — chosen over MIT for two of its clauses, not for anything this
