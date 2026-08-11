@@ -1,3 +1,5 @@
+<img src="bayerlink.svg" alt="bayerlink: a Bayer mosaic of chain links" width="96" align="right">
+
 # bayerlink
 
 **Raw sensor data over an HDMI/DVI link.**
