@@ -52,9 +52,9 @@ open an issue.
 Developed independently; recurring support via
 [github.com/sponsors/lanserge](https://github.com/sponsors/lanserge), or write
 first: **s.rabykin@gmail.com**. Sponsorable capability targets carry the
-`sponsorable` label on the issue tracker — currently the
-[PiSP compressed payload family](https://github.com/bayerlink/bayerlink/issues/1)
-(Pi 5 sources at ~1 byte/sample). Scope is agreed in writing before work
+[`sponsorable` label on the issue tracker](https://github.com/bayerlink/bayerlink/issues?q=label%3Asponsorable)
+— currently the PiSP compressed payload family and the laptop replay
+player. Scope is agreed in writing before work
 starts; sponsored work lands in the open tree immediately, licensed like
 everything else — sponsorship buys ordering and named credit, not
 exclusivity. The person behind it:
