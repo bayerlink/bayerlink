@@ -57,7 +57,8 @@ first: **s.rabykin@gmail.com**. Sponsorable capability targets carry the
 (Pi 5 sources at ~1 byte/sample). Scope is agreed in writing before work
 starts; sponsored work lands in the open tree immediately, licensed like
 everything else — sponsorship buys ordering and named credit, not
-exclusivity.
+exclusivity. The person behind it:
+[serge.rabyking.com](https://serge.rabyking.com).
 
 ## Licence
 
