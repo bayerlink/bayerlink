@@ -201,6 +201,7 @@ never registered and never collide with an assignment.
 | --- | --- | --- |
 | [`picam2hdmi`](https://github.com/bayerlink/picam2hdmi) | encoder — Raspberry Pi, every libcamera sensor | reference encoder; patterns, container and KMS scanout implemented, awaiting the first on-target run |
 | [`np2hw.bayerlink_in`](https://github.com/lanserge/np2hw) | decoder — parallel video in, elastic 12-bit stream out, for FPGA receivers | **working** — bit-exact against the reference codec in simulation; the protocol's first independent implementation |
+| [`bayerlink-fpga`](https://github.com/bayerlink/bayerlink-fpga) | decoder on real boards — TMDS front end, per-board lane maps, on-target judging around `np2hw.bayerlink_in` | **working on silicon** — PYNQ-Z2, 4/4 consecutive frames bit-exact and framing-exact against the reference codec, judged on the board's own ARM |
 | [`bayertap`](https://github.com/bayerlink/bayertap) | decoder — passive conformance tap: any V4L2 capture device, lane probing, pattern judging, the luma tunnel for Y-only dongles | **working** off-target; meets capture silicon at the bench |
 | Microcontroller pattern dongle (RP2350/HSTX) | encoder — receiver bring-up with no camera; DVP-class sensors via the RAW8 fourccs | anticipated |
 | Jetson tool | encoder — MIPI sensors beyond the Pi's ecosystem | anticipated |
