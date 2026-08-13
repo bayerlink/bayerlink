@@ -43,11 +43,17 @@ over lane names.
 ## Layout
 
 ```
-line 0            header (32 bytes, then zeros to end of line)
+line 0            header (48 bytes, then zeros to end of line)
 line 1..height    one camera line per display line: the camera line's packed
                   bytes, left-aligned, zero-padded to the display line width
 remaining lines   zeros
 ```
+
+Line 0 belongs to the PROTOCOL, not the camera: no sensor data is ever
+displaced or overwritten by the header. The camera's first line is
+container line 1. (Sensor folk will recognise the shape — MIPI CSI-2
+sensors ship their metadata the same way, as embedded data lines
+around the pixel array.)
 
 One camera frame occupies one display frame. If the display refreshes faster
 than the camera delivers, the SAME encoded frame is scanned out again,
