@@ -21,4 +21,12 @@ What that means in practice:
 The name is written bayerlink™, and only that way; nothing in this
 repository may describe the mark as registered.
 
+## Other people's marks
+
+This repository refers to third-party standards by name — V4L2 fourcc
+codes, CSI-2 packings, MIPI® specifications — solely to identify those
+standards and describe factual compatibility. MIPI is a registered
+trademark of MIPI Alliance, Inc. No affiliation, endorsement or
+compliance certification is claimed or implied by any such reference.
+
 Questions or a use you are unsure about: s.rabykin@gmail.com.
