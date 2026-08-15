@@ -344,6 +344,10 @@ def unpack_samples(packed: np.ndarray, bits: int = 12) -> np.ndarray:
 # Frame container
 # --------------------------------------------------------------------------- #
 
+# The header occupies whole display lines: exactly one, today.
+HEADER_LINES = 1
+
+
 def check_geometry(width: int, height: int, display: tuple[int, int],
                    bits: int = 12) -> None:
     """Refuse a camera mode the container cannot carry.
@@ -363,9 +367,9 @@ def check_geometry(width: int, height: int, display: tuple[int, int],
         raise ValueError(
             f"{width} samples/line needs {line_bytes} bytes, but a "
             f"{display_width}-pixel display line carries {display_width * 3}")
-    if height + 1 > display_height:
+    if height + HEADER_LINES > display_height:
         raise ValueError(
-            f"{height} camera lines + 1 header line exceed the "
+            f"{height} camera lines + {HEADER_LINES} header line exceed the "
             f"{display_height}-line display frame")
 
 
@@ -381,7 +385,7 @@ def fits_line_rate(width: int, total_line_slots: int) -> bool:
 
 
 def encode_frame(raw: np.ndarray, bayer_order: str | None, frame_seq: int,
-                 display: tuple[int, int] = (1920, 1080),
+                 display: tuple[int, int] | None = None,
                  flags: int = 0, source_id: int = 0, bits: int = 12,
                  stripe: tuple[int, int, int, int] | None = None) -> np.ndarray:
     """One camera frame -> the (height, width, 3) uint8 container to scan out.
@@ -389,6 +393,21 @@ def encode_frame(raw: np.ndarray, bayer_order: str | None, frame_seq: int,
     ``raw`` is (lines, samples) uint16, one camera line per row. The result is
     the display frame's memory image: header in line 0, one packed camera line
     per display line, zeros elsewhere.
+
+    ``display`` is the RASTER the container is scanned out on, and it is
+    not derivable from the picture: a line's samples are packed into
+    bytes, so 2028 12-bit samples ride comfortably in a 1920-pixel line,
+    and which rasters exist at all is a property of the display, not of
+    this module.
+
+    What IS this module's business is the header's line. Omit ``display``
+    and you get one display pixel per sample -- generous, but always
+    legal -- and the height with the header's line already added. An
+    author who writes a 1920x1080 picture should not have to know the
+    container is 1081 lines tall, and having to say so was a way to get
+    it wrong. Pass ``display`` when the container must be a PARTICULAR
+    video mode; the height you pass is then the whole raster, header
+    line included.
 
     ``stripe`` is ``(index, count, offset, full_height)`` when ``raw`` is one
     band of a larger frame travelling over several links; most callers want
@@ -398,6 +417,8 @@ def encode_frame(raw: np.ndarray, bayer_order: str | None, frame_seq: int,
     if raw.ndim != 2:
         raise ValueError(f"raw frame must be (lines, samples), got {raw.shape}")
     height, width = raw.shape
+    if display is None:
+        display = (width, height + HEADER_LINES)
     check_geometry(width, height, display, bits=bits)
     display_width, display_height = display
 

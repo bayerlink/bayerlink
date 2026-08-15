@@ -197,8 +197,11 @@ def test_encode_decode_round_trips_at_reference_geometry():
     display carries at most N-1 camera lines — the first bug this suite
     caught, pinned by the refusal test below.
     """
+    # The raster is STATED: 2028 samples pack into a 1920-pixel line, so
+    # the container's width is a display mode, not the sample count.
     raw = pattern.generate("corners", 2028, 1078)
-    frame = protocol.encode_frame(raw, "RGGB", frame_seq=7)
+    frame = protocol.encode_frame(raw, "RGGB", frame_seq=7,
+                                  display=(1920, 1080))
     assert frame.shape == (1080, 1920, 3) and frame.dtype == np.uint8
 
     header, decoded = protocol.decode_frame(frame)
@@ -214,7 +217,7 @@ def test_encode_decode_round_trips_at_reference_geometry():
 def test_a_full_height_frame_is_refused_the_header_line_is_not_free():
     with pytest.raises(ValueError, match="header line"):
         protocol.encode_frame(np.zeros((1080, 2028), np.uint16), "RGGB",
-                              frame_seq=0)
+                              frame_seq=0, display=(1920, 1080))
 
 
 def test_geometry_that_does_not_fit_is_refused_before_encoding():
