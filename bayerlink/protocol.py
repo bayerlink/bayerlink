@@ -61,6 +61,44 @@ _TO_FOURCC = {(bits, order): code for code, (bits, order) in _FOURCC.items()}
 # bit 1 = row parity of R, bit 0 = column parity of R.
 BAYER_PHASE = {"RGGB": 0b00, "GRBG": 0b01, "GBRG": 0b10, "BGGR": 0b11}
 
+# Sensor model -> source_id. The header field is a u8 and a receiver only
+# ever sees the number, so a hash would be unreadable at the far end: the
+# mapping has to be a shared table, and it lives here because what a
+# protocol field MEANS is the protocol's to say. Both the encoder that
+# stamps it and the host that reads it import this one dict.
+#
+# Keyed by libcamera's `Model` property, lower-cased, which is what the
+# sensor calls itself. 0 stays UNSPECIFIED, so an unknown sensor is
+# visibly unknown rather than quietly someone else.
+#
+# This identifies a MODEL, not a device. Where two cameras of the same
+# model run at once, `source_id` is what tells their streams apart and
+# a model-derived value cannot -- stamp those explicitly instead.
+SENSOR_SOURCE_IDS = {
+    "ov5647": 1,      # Pi Camera v1
+    "imx219": 2,      # Pi Camera v2
+    "imx477": 3,      # HQ Camera
+    "imx708": 4,      # Camera Module 3
+    "imx296": 5,      # Global Shutter Camera
+    "imx519": 6,      # Arducam 16MP
+    "ov9281": 7,      # monochrome global shutter
+    "imx290": 8,      # low light
+}
+SOURCE_ID_UNSPECIFIED = 0
+
+
+def source_id_for(model: str | None) -> int:
+    """The u8 for a sensor model, or 0 when it has no assigned one.
+
+    Unknown is not an error: a source may legitimately be something this
+    table has never heard of, and saying 0 is honest where inventing an
+    id would collide with a real one later.
+    """
+    if not model:
+        return SOURCE_ID_UNSPECIFIED
+    return SENSOR_SOURCE_IDS.get(str(model).strip().lower(),
+                                 SOURCE_ID_UNSPECIFIED)
+
 
 def fourcc_code(text: str) -> int:
     """The u32 a four-character code occupies, little-endian."""
