@@ -27,7 +27,13 @@ from .protocol import (
 )
 from . import pattern, tunnel
 
-__version__ = "0.3.0"
+# The version has ONE owner: the packaging metadata in
+# pyproject.toml. Read back from the INSTALLED distribution
+# rather than restated here, so this can never claim a version
+# other than the one pip actually resolved.
+from importlib.metadata import version as _version
+
+__version__ = _version("bayerlink")
 
 __all__ = [
     "Header", "encode_frame", "encode_packed", "decode_frame", "pack_samples", "unpack_samples",
