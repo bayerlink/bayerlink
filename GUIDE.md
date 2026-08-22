@@ -37,7 +37,7 @@ patterns, self-described by the header line. With a camera attached,
 taken from libcamera's report, AE/AWB off by default (a raw source is
 deterministic; set `--exposure-us` and `--gain` yourself), and `--crop
 x,y,w,h` selects a window: how a big sensor meets the link budget, and
-how a small window fits the luma tunnel for byte-level verification.
+how a small window fits the wire for byte-level verification.
 
 For a permanent bench, run it as an INSTRUMENT — `picam2hdmi serve`
 (systemd unit in `contrib/`) streams from power-on and takes control
@@ -91,36 +91,28 @@ byte container survives its pipeline:
 
 | Device class | Path | What survives |
 | --- | --- | --- |
-| TC358743 bridge (Pi HDMI-to-CSI boards) | `--via direct` | bytes, exactly |
-| MS2130S / MS2131S (USB3, ~$15) | `--via direct` | bytes, if the stick is transparent — `check` answers in minutes |
-| MS2109-class (USB2, ~$10, YUY2-only) | `--via tunnel` | luma only — use the tunnel |
+| TC358743 bridge (Pi HDMI-to-CSI boards) | direct | bytes, exactly |
+| MS2130S / MS2131S (USB3, ~$15) | direct | bytes, if the stick is transparent — `check` answers in minutes |
 
 On Linux, [`bayertap`](https://github.com/bayerlink/bayertap) speaks to
 the device directly:
 
 ```sh
 bayertap probe                                    # resolve byte lanes
-bayertap --via direct check --pattern counting    # judge the link
+bayertap check --pattern counting                  # judge the link
 ```
 
 On macOS (no V4L2), grab through ffmpeg and check from the file:
 
 ```sh
-python3 contrib/macgrab.py --device "USB Video" --mode tunnel --fps 5 --out grab.npy
-bayertap --from-file grab.npy --via tunnel check --pattern counting
+python3 contrib/macgrab.py --device "USB Video" --fps 5 --out grab.npy
+bayertap --from-file grab.npy check --pattern counting
 ```
 
 Address the stick by **name**, not index — it re-enumerates when the
 HDMI signal drops. Prefer a low `--fps`: cheap sticks switch to MJPEG
 (with its artifacts) at rates USB2 cannot carry raw.
 
-For the MS2109 tunnel, the source wraps the container
-(`picam2hdmi stream --luma-tunnel`) and pays 40x capacity for exactness:
-inside a 1080p mode that is a camera of up to 48 x 1078 *bytes* per
-line — pick something like `--width 88 --height 240`. The tunnel's
-pilot line learns the stick's level curve and line delay by itself;
-when it cannot classify safely, it refuses with the measurement in the
-message rather than returning plausible wrong bytes.
 
 ## 4. Other formats
 

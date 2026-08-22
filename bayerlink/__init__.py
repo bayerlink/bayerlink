@@ -23,7 +23,7 @@ from .protocol import (
     split_stripes,
     unpack_samples,
 )
-from . import pattern, recording, tunnel
+from . import pattern, recording
 
 # The version has ONE owner: the packaging metadata in
 # pyproject.toml. Read back from the INSTALLED distribution
@@ -39,5 +39,5 @@ __all__ = [
     "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",
     "BAYER_PHASE", "FLAG_TEST_PATTERN", "pattern",
-    "detect_lane_map", "tunnel",
+    "detect_lane_map",
 ]

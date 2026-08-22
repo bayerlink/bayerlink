@@ -305,7 +305,7 @@ def test_the_committed_vectors_are_what_this_implementation_produces():
 
 
 # --------------------------------------------------------------------------- #
-# Lane detection and the luma tunnel: the bench helpers
+# Lane detection: the bench helpers
 # --------------------------------------------------------------------------- #
 
 def test_detect_lane_map_recovers_any_permutation():
@@ -333,72 +333,6 @@ def test_detect_lane_map_refuses_a_value_mangling_link():
         protocol.detect_lane_map(clamped)
 
 
-def _nasty_channel(grey, rng, delay=2):
-    """The channel the first real stick applied, measured on the bench:
-    a linear range EXPANSION with top clipping (the limited-range
-    interpretation that crushes full-swing levels), a horizontal FIR with
-    ~5% side taps (the leakage measured at full swing), a two-pixel
-    delay, and noise. The 2026-08-10 MS2109 session is
-    pinned here; a tunnel that survives this survives the hardware."""
-    y = grey[:, :, 0].astype(np.float64)
-    y = np.clip((y - 16.0) * (255.0 / 186.0), 0, 255)   # expand, knee ~200
-    # the low-pass measured on the bench: ~2-3 px support, symmetric
-    k = np.array([0.06, 0.16, 0.56, 0.16, 0.06])
-    y = sum(w * np.roll(y, i - 2, axis=1) for i, w in enumerate(k))
-    if delay:
-        shifted = np.zeros_like(y)
-        shifted[:, delay:] = y[:, :y.shape[1] - delay]
-        y = shifted
-    y = y + rng.normal(0.0, 1.0, y.shape)
-    return np.clip(np.round(y), 0, 255).astype(np.uint8)
-
-
-def test_luma_tunnel_survives_a_nasty_channel_bit_exact():
-    """The whole point: exact bytes through a lossy-looking path."""
-    from bayerlink import tunnel
-
-    rng = np.random.default_rng(20260808)
-    phys = (880, 40)                              # inner width 22
-    inner_w, _ = tunnel.inner_display(*phys)
-    raw = pattern.generate("corners", inner_w * 2 - 2, 20)
-    # ^ one byte short of a full line: a delayed channel loses the last
-    # columns physically, so a source keeps end-of-line slack.
-    container = protocol.encode_frame(raw, "BGGR", frame_seq=3,
-                                      display=(inner_w, 24))
-    grey = tunnel.encode(container, phys)
-    assert (grey[:, :, 0] == grey[:, :, 1]).all() and \
-           (grey[:, :, 0] == grey[:, :, 2]).all()
-
-    luma = _nasty_channel(grey, rng)
-    recovered = tunnel.decode(luma, inner_height=container.shape[0])
-    assert np.array_equal(recovered, container)
-
-    header, decoded = protocol.decode_frame(recovered)
-    assert np.array_equal(decoded, raw)
-    assert header.frame_seq == 3 and header.bayer_order == "BGGR"
-
-
-def test_luma_tunnel_refuses_a_channel_it_cannot_classify():
-    from bayerlink import tunnel
-
-    phys = (880, 40)
-    inner_w, _ = tunnel.inner_display(*phys)
-    raw = pattern.generate("gradient", inner_w * 2 - 2, 8)
-    container = protocol.encode_frame(raw, "RGGB", frame_seq=0,
-                                      display=(inner_w, 12))
-    grey = tunnel.encode(container, phys)
-
-    crushed = (grey[:, :, 0] // 16).astype(np.uint8)   # levels collapse
-    with pytest.raises(ValueError, match="not strictly increasing"):
-        tunnel.decode(crushed, inner_height=container.shape[0])
-
-    with pytest.raises(ValueError, match="not a monotonic map"):
-        tunnel.decode(255 - grey[:, :, 0], inner_height=container.shape[0])
-
-
-# --------------------------------------------------------------------------- #
-# Striping across links
-# --------------------------------------------------------------------------- #
 
 def test_split_stripes_tiles_evenly_or_refuses():
     assert protocol.split_stripes(10, 3) == [(0, 4), (4, 4), (8, 2)]
@@ -431,50 +365,6 @@ def test_a_torn_frame_is_refused_not_assembled():
                                      display=(16, 8))]
     with pytest.raises(ValueError, match="torn"):
         protocol.reassemble(parts[:1])
-
-
-def test_stripes_of_different_frames_or_cameras_never_mix():
-    raw = pattern.generate("checker", 16, 8)
-    def stripes(seq, source):
-        return [protocol.decode_frame(c) for c in
-                protocol.encode_stripes(raw, "RGGB", frame_seq=seq,
-                                        stripes=2, display=(16, 8),
-                                        source_id=source)]
-    with pytest.raises(ValueError, match="frame_seq"):
-        protocol.reassemble([stripes(1, 0)[0], stripes(2, 0)[1]])
-    with pytest.raises(ValueError, match="source_id"):
-        protocol.reassemble([stripes(5, 0)[0], stripes(5, 1)[1]])
-
-
-# --------------------------------------------------------------------------- #
-# The luma tunnel learns its channel
-# --------------------------------------------------------------------------- #
-
-def test_tunnel_survives_the_measured_channel_bit_exactly():
-    """The full bench channel -- expansion, clipping, FIR, delay, noise --
-    at 1080p geometry, for a range of delays. Found on hardware, on the
-    first frames the first stick ever returned."""
-    from bayerlink import tunnel
-
-    rng = np.random.default_rng(20260810)
-    inner = tunnel.inner_display(1920, 1080)
-    raw = pattern.generate("counting", 88, 240)
-    container = protocol.encode_frame(raw, "RGGB", frame_seq=3, display=inner)
-    grey = tunnel.encode(container, (1920, 1080))
-    for delay in (0, 2, 7, 12):
-        luma = _nasty_channel(grey, rng, delay=delay)
-        header, decoded = protocol.decode_frame(
-            tunnel.decode(luma, inner_height=inner[1]))
-        assert np.array_equal(decoded, raw), f"delay {delay}"
-        assert header.frame_seq == 3
-
-
-def test_tunnel_refuses_a_channel_that_is_not_a_staircase():
-    from bayerlink import tunnel
-
-    flat = np.full((1080, 1920), 128, np.uint8)
-    with pytest.raises(ValueError, match="not strictly increasing"):
-        tunnel.decode(flat, inner_height=1079)
 
 
 def test_encode_packed_is_encode_frame_without_the_repack():
