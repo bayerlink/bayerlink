@@ -74,7 +74,7 @@ timing.
 | 16 | u32 | `height` | camera lines THIS stream carries (a stripe's band, or the whole frame) |
 | 20 | u32 | `frame_seq` | increments once per NEW camera frame |
 | 24 | u32 | `flags` | bit 0: payload is a test pattern; other bits MBZ |
-| 28 | u8 | `source_id` | which camera this stream carries |
+| 28 | u8 | `source_id` | which source on the sending device: an index, 0 for a single-sensor device |
 | 29 | u8 | `stripe_index` | 0-based, `< stripe_count` |
 | 30 | u8 | `stripe_count` | stripes this frame travels as; 1 = unstriped |
 | 31 | u8 | reserved | MBZ |

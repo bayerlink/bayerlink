@@ -496,40 +496,25 @@ def test_encode_packed_is_encode_frame_without_the_repack():
 # Sensor identity: the one thing a hot swap needs that the pixels cannot say
 # --------------------------------------------------------------------------- #
 
-def test_source_id_is_derived_from_the_sensor_model():
-    """A receiver sees a number, so both ends must read the same table."""
-    assert protocol.source_id_for("ov5647") == 1
-    assert protocol.source_id_for("imx477") == 3
 
 
-def test_source_id_ignores_how_the_model_is_spelled():
-    """libcamera reports `Model` verbatim; casing is not identity."""
-    for spelling in ("OV5647", "ov5647", " Ov5647 "):
-        assert protocol.source_id_for(spelling) == 1
 
 
-def test_an_unknown_sensor_is_visibly_unknown():
-    """0 rather than a guess: an invented id collides with a real one."""
-    assert protocol.source_id_for("nonesuch") == protocol.SOURCE_ID_UNSPECIFIED
-    assert protocol.source_id_for(None) == protocol.SOURCE_ID_UNSPECIFIED
-    assert protocol.source_id_for("") == protocol.SOURCE_ID_UNSPECIFIED
+def test_source_id_is_an_index_not_an_identity():
+    """It tells apart the SOURCES on one device -- 0, 1, 2 -- and a
+    device with one sensor sends 0.
 
+    It briefly carried a sensor-model registry so a receiver could pick
+    a calibration from the wire. That could not do the field's actual
+    job: two cameras of the same model are two sources and one model.
+    Calibration reaches the receiver another way now, over the link's
+    own register channel, from whoever owns the sensor.
+    """
+    assert protocol.SOURCE_ID_UNSPECIFIED == 0
+    assert not hasattr(protocol, "source_id_for")
+    assert not hasattr(protocol, "SENSOR_SOURCE_IDS")
+    stereo = [protocol.Header(fourcc=protocol.fourcc_for("RGGB", 10),
+                              width=64, height=32, frame_seq=1,
+                              source_id=i) for i in (0, 1)]
+    assert [protocol.Header.unpack(h.pack()).source_id for h in stereo] == [0, 1]
 
-def test_the_table_fits_the_field_and_has_no_collisions():
-    """source_id is a u8, and two sensors sharing one is the bug it
-    would cause -- a stream loading another sensor's calibration."""
-    ids = list(protocol.SENSOR_SOURCE_IDS.values())
-    assert all(0 < i <= 255 for i in ids), "0 is reserved for unspecified"
-    assert len(set(ids)) == len(ids), "two models share an id"
-    assert all(k == k.strip().lower() for k in protocol.SENSOR_SOURCE_IDS), \
-        "keys must be lower-case, since lookup lower-cases"
-
-
-def test_the_stamped_id_survives_a_round_trip():
-    raw = np.random.default_rng(4).integers(0, 1024, (4, 8), dtype=np.uint16)
-    sid = protocol.source_id_for("imx708")
-    frame = protocol.encode_frame(raw, "RGGB", frame_seq=3, display=(16, 6),
-                                  bits=10, source_id=sid)
-    header, back = protocol.decode_frame(frame)
-    assert header.source_id == sid
-    assert np.array_equal(back, raw)

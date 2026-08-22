@@ -7,8 +7,6 @@ the same module. The committed vectors pin the exact bytes, so a conforming
 implementation in any language never has to run this one.
 """
 from .protocol import (
-    SENSOR_SOURCE_IDS,
-    source_id_for,
     BAYER_PHASE,
     detect_lane_map,
     FLAG_TEST_PATTERN,
@@ -41,6 +39,5 @@ __all__ = [
     "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",
     "BAYER_PHASE", "FLAG_TEST_PATTERN", "pattern",
-    "SENSOR_SOURCE_IDS", "source_id_for",
     "detect_lane_map", "tunnel",
 ]
