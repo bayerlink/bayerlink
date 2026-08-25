@@ -49,6 +49,29 @@ encoder: [picam2hdmi](https://github.com/bayerlink/picam2hdmi) (Raspberry Pi,
 every libcamera sensor). To be listed: implement the spec, pass the vectors,
 open an issue.
 
+## After the decoder
+
+This library is the wire and nothing beyond it: it says what a frame looks
+like, not what to do with one. A decoder hands you raw Bayer plus the
+header's geometry, CFA phase and depth — and those are exactly what an ISP
+needs to be told, which is why they travel with the frame rather than
+being configured at both ends.
+
+One path is built end to end, if you want the frames processed rather than
+merely received:
+
+- [`np2hw.video_in`](https://github.com/lanserge/np2hw) decodes the link on
+  an FPGA and aligns sample depth on the way in.
+- [revela](https://github.com/lanserge/revela) generates the ISP that
+  consumes it, taking geometry and phase as stream context — the header's
+  facts, wired straight through rather than copied into registers.
+- [bayerlink-fpga](https://github.com/bayerlink/bayerlink-fpga) is all of
+  it on a PYNQ-Z2, and the reason the two rows below it in the registry
+  say "working on silicon".
+
+None of that is required by the protocol. A decoder that hands frames to
+something else entirely is just as conformant — the vectors are the test.
+
 ## Funding
 
 Developed independently; recurring support via
