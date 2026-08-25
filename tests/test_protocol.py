@@ -1,3 +1,5 @@
+# Copyright 2026 Serge Rabyking
+# SPDX-License-Identifier: Apache-2.0
 """bayerlink v2 against its own spec: round trips, refusals, striping, the rate rule."""
 import struct
 import zlib

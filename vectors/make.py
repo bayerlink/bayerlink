@@ -1,3 +1,5 @@
+# Copyright 2026 Serge Rabyking
+# SPDX-License-Identifier: Apache-2.0
 """Regenerate the conformance vectors. A diff here is a protocol change."""
 import pathlib
 

@@ -1,3 +1,5 @@
+# Copyright 2026 Serge Rabyking
+# SPDX-License-Identifier: Apache-2.0
 """Test patterns: the frames used to prove a link before any camera exists.
 
 Phase 0 of any receiver bring-up is a pattern loopback -- encode a known

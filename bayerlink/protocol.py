@@ -1,3 +1,5 @@
+# Copyright 2026 Serge Rabyking
+# SPDX-License-Identifier: Apache-2.0
 """bayerlink v2: the reference implementation of PROTOCOL.md.
 
 This module IS the executable form of the specification, and it lives in the

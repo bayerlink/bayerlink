@@ -1,3 +1,5 @@
+# Copyright 2026 Serge Rabyking
+# SPDX-License-Identifier: Apache-2.0
 """bayerlink -- raw sensor data over an HDMI/DVI link.
 
 The specification is PROTOCOL.md in this repository; this package is its
