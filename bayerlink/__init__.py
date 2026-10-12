@@ -25,7 +25,7 @@ from .protocol import (
     split_stripes,
     unpack_samples,
 )
-from . import pattern, recording
+from . import pattern, rasters, recording
 
 # The version has ONE owner: the packaging metadata in
 # pyproject.toml. Read back from the INSTALLED distribution
@@ -36,7 +36,7 @@ from importlib.metadata import version as _version
 __version__ = _version("bayerlink")
 
 __all__ = [
-    "recording",
+    "recording", "rasters",
     "Header", "encode_frame", "encode_packed", "decode_frame", "pack_samples", "unpack_samples",
     "encode_stripes", "reassemble", "split_stripes",
     "check_geometry", "fits_line_rate", "fourcc_for",

@@ -6,6 +6,16 @@ the *library* did, and calls out anything a caller has to change.
 
 Pre-1.0, so the API can still move. Anything that moves is named here.
 
+## Unreleased
+
+### Added
+
+- **`bayerlink.rasters`** — the CEA-861 rasters a link runs on: totals,
+  active area, sync windows and polarities, pixel clock, by name
+  (`raster("1080p30")`). The source setting its output, the receiver
+  advertising its EDID and a display behind the receiver all need the
+  same numbers; each had kept its own copy.
+
 ## 0.5.0
 
 ### Added
