@@ -50,6 +50,20 @@ def test_a_header_that_disagrees_with_its_array_is_refused():
         recording.split(c[:-1])            # one row short of its own claim
 
 
+def test_a_line_as_wide_as_its_packed_samples_is_a_container(tmp_path):
+    """A link sized by the packed line carries 96 12-bit samples in 48
+    pixels of three bytes: a container as real as one a pixel a sample,
+    and it round-trips. One pixel narrower cannot hold the line."""
+    c = np.asarray(container(6))
+    packed = np.ascontiguousarray(c[:, :48])     # 48 * 3 = 96 * 12 / 8
+    path = tmp_path / "packed.npy"
+    assert recording.save(path, packed) == 1
+    header, payload = next(recording.frames(path))
+    assert header.width == 96 and payload.shape == (64, 48, 3)
+    with pytest.raises(ValueError, match="144 bytes a line"):
+        recording.split(c[:, :47])
+
+
 def test_a_file_without_a_header_row_is_refused(tmp_path):
     """Payload saved on its own is not a recording; it is a picture
     whose mosaic order nobody can recover."""

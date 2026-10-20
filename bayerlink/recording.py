@@ -21,9 +21,12 @@ it.
         print(header.width, header.height, header.fourcc)
 
 On disk it is one ``.npy`` holding a 4-D uint8 array,
-``(frames, lines, samples, 3)`` with ``lines == height + 1``. NumPy
-carries as many frames as fit in one array, so a clip is a stack and a
-still is a stack of one -- there is no second shape to special-case.
+``(frames, lines, pixels, 3)`` with ``lines == height + 1`` -- a line of
+link pixels, three bytes each, as wide as the link that carried it: as
+many as the frame has samples, or just as many as hold its packed line.
+NumPy carries as many frames as fit in one array, so a clip is a stack
+and a still is a stack of one -- there is no second shape to
+special-case.
 """
 from __future__ import annotations
 
@@ -45,14 +48,18 @@ def split(container: np.ndarray) -> tuple[Header, np.ndarray]:
     container = np.asarray(container)
     if container.ndim != 3 or container.shape[-1] != 3:
         raise ValueError(
-            f"a container is (lines, samples, 3); got {container.shape}")
+            f"a container is (lines, pixels, 3); got {container.shape}")
     header = Header.unpack(
         np.ascontiguousarray(container[0]).tobytes()[:HEADER_BYTES])
     lines, width = container.shape[0], container.shape[1]
-    if header.width != width:
+    # a line holds its samples packed; the link may carry more pixels than
+    # that -- one a sample, as this library encodes -- but never fewer
+    packed = -(-header.width * header.bits // 8)
+    if width * 3 < packed:
         raise ValueError(
-            f"the header says width {header.width}, the array is {width} "
-            "samples wide")
+            f"the header says {header.width} {header.bits}-bit samples, "
+            f"{packed} bytes a line; the array's {width}-pixel lines hold "
+            f"{width * 3}")
     if header.height != lines - 1:
         raise ValueError(
             f"the header says height {header.height}, the array carries "

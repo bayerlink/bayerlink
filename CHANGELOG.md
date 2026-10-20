@@ -16,6 +16,14 @@ Pre-1.0, so the API can still move. Anything that moves is named here.
   advertising its EDID and a display behind the receiver all need the
   same numbers; each had kept its own copy.
 
+### Fixed
+
+- **A recording may be as wide as its link.** `recording.split` (and so
+  `save`, `frames`) required a container's lines to be as many pixels as
+  the frame has samples, so a link sized by the packed line -- 800 pixels
+  carrying 1920 10-bit samples -- recorded nothing at all. A container's
+  line must now hold its packed samples, and may hold more.
+
 ## 0.5.0
 
 ### Added
