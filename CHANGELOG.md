@@ -6,7 +6,7 @@ the *library* did, and calls out anything a caller has to change.
 
 Pre-1.0, so the API can still move. Anything that moves is named here.
 
-## Unreleased
+## 0.6.0
 
 ### Added
 
