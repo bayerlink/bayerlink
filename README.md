@@ -60,14 +60,14 @@ being configured at both ends.
 One path is built end to end, if you want the frames processed rather than
 merely received:
 
-- [`np2hw.video_in`](https://github.com/lanserge/np2hw) decodes the link on
-  an FPGA and aligns sample depth on the way in.
+- [bayerlink-fpga](https://github.com/bayerlink/bayerlink-fpga) decodes the
+  link on an FPGA, behind its TMDS front ends, and aligns sample depth on
+  the way in.
 - [revela](https://github.com/lanserge/revela) generates the ISP that
   consumes it, taking geometry and phase as stream context — the header's
   facts, wired straight through rather than copied into registers.
-- [bayerlink-fpga](https://github.com/bayerlink/bayerlink-fpga) is all of
-  it on a PYNQ-Z2, and the reason the two rows below it in the registry
-  say "working on silicon".
+- revela's `boards/pynq_z2` is all of it on a PYNQ-Z2, and the reason the
+  two rows below it in the registry say "working on silicon".
 
 None of that is required by the protocol. A decoder that hands frames to
 something else entirely is just as conformant — the vectors are the test.
